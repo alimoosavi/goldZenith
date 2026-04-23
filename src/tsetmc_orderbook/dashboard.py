@@ -195,8 +195,8 @@ def draw_dashboard(stdscr, books, prev_snaps, idx, max_len, speed_ms, paused, da
     bottom = H - 2
     time_str = books[0]["snapshots"][min(idx, len(books[0]["snapshots"]) - 1)]["time"]
 
-    open_secs  = 8 * 3600 + 45 * 60
-    close_secs = 12 * 3600 + 30 * 60
+    open_secs  = 8  * 3600 + 45 * 60
+    close_secs = 15 * 3600 + 30 * 60
     h, m, s = map(int, time_str.split(":"))
     elapsed = (h * 3600 + m * 60 + s) - open_secs
     total_t = close_secs - open_secs

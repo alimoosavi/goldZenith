@@ -2,8 +2,9 @@
 
 import pandas as pd
 
-MARKET_OPEN = 84500    # 08:45:00
-MARKET_CLOSE = 123000  # 12:30:00
+MARKET_OPEN = 84500     # 08:45:00  (stock pre-open start)
+MARKET_CLOSE = 153000   # 15:30:00  (widest: covers ETFs / funds that trade
+                        #           past the 12:30 equity close)
 
 DEPTH_COLS = [
     "buy_count", "buy_volume", "buy_price",
@@ -27,9 +28,12 @@ def seconds_to_time(secs: int) -> str:
 
 def build_snapshots(raw: list) -> list:
     """
-    Returns a list of per-second dicts covering 08:45:00 → 12:30:00.
+    Returns a list of per-second dicts from the first observed event
+    (≥ 08:45:00) through the last observed event (≤ 15:30:00).
     Each dict: { 'time': 'HH:MM:SS', 'depths': [ {depth,buy_*,sell_*}, ... ] }
-    Forward-filled so every second has a complete 5-depth book state.
+    Forward-filled so every second within that span has a complete 5-depth
+    book state. Instruments that close at 12:30 naturally stop there; ETFs
+    and funds that trade into the afternoon keep going.
     """
     rows = []
     for e in raw:
@@ -60,13 +64,15 @@ def build_snapshots(raw: list) -> list:
     wide[val_cols] = wide[val_cols].ffill()
 
     wide = wide[(wide["hEven"] >= MARKET_OPEN) & (wide["hEven"] <= MARKET_CLOSE)]
+    if wide.empty:
+        return []
     wide["secs"] = wide["hEven"].apply(heven_to_seconds)
 
-    open_secs = heven_to_seconds(MARKET_OPEN)
-    close_secs = heven_to_seconds(MARKET_CLOSE)
+    open_secs  = heven_to_seconds(MARKET_OPEN)
+    last_secs  = int(wide["secs"].max())
 
     snapshots = []
-    for sec in range(open_secs, close_secs + 1):
+    for sec in range(open_secs, last_secs + 1):
         mask = wide["secs"] <= sec
         if not mask.any():
             continue

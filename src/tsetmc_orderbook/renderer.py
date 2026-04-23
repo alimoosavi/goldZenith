@@ -189,8 +189,8 @@ def draw_frame(stdscr, snap, ticker, jalali_date, idx, total,
 
     # time + progress
     time_str = snap["time"]
-    open_secs  = 8 * 3600 + 45 * 60
-    close_secs = 12 * 3600 + 30 * 60
+    open_secs  = 8  * 3600 + 45 * 60
+    close_secs = 15 * 3600 + 30 * 60
     h, m, s = map(int, time_str.split(":"))
     elapsed = (h * 3600 + m * 60 + s) - open_secs
     total_t = close_secs - open_secs
@@ -211,7 +211,7 @@ def draw_frame(stdscr, snap, ticker, jalali_date, idx, total,
     snap_str = f"  {idx+1}/{total}"
     time_line = f"  {time_str}  {status}{spd_str}{snap_str}"
     open_lbl  = "  08:45"
-    close_lbl = "12:30  "
+    close_lbl = "15:30  "
 
     stdscr.attron(curses.color_pair(C_WHITE) | curses.A_BOLD)
     stdscr.addstr(row, x0, time_line[:W - x0 - 1])
