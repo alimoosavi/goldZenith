@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TSETMC Orderbook Replay</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1c2128;
+      --fg: #e6e1cf;
+      --dim: #5c6773;
+      --border: #3e4451;
+      --buy: #73d13d;
+      --buy-bg: rgba(115, 209, 61, 0.18);
+      --sell: #ff4d4f;
+      --sell-bg: rgba(255, 77, 79, 0.18);
+      --gold: #ffb454;
+      --accent: #39bae6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font-family: 'SF Mono', Menlo, Consolas, 'Courier New', monospace;
+      margin: 0;
+      padding: 1.2em 1.5em 2em;
+      font-size: 14px;
+    }
+    h1 {
+      color: var(--gold);
+      margin: 0 0 1em;
+      font-size: 1.4em;
+      letter-spacing: 0.5px;
+    }
+    .controls {
+      display: flex;
+      gap: 0.8em;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      padding: 1em;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin-bottom: 1em;
+    }
+    .field { display: flex; flex-direction: column; gap: 0.3em; }
+    .field label { color: var(--dim); font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.5px; }
+    input[type="text"], input[type="number"] {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      padding: 0.5em 0.7em;
+      font-family: inherit;
+      font-size: 0.95em;
+      border-radius: 4px;
+    }
+    input[type="number"] { width: 90px; }
+    input[type="text"] { width: 460px; }
+    input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+    button {
+      background: var(--gold);
+      color: var(--bg);
+      border: none;
+      padding: 0.65em 1.3em;
+      font-family: inherit;
+      font-weight: bold;
+      font-size: 0.95em;
+      cursor: pointer;
+      border-radius: 4px;
+      letter-spacing: 0.5px;
+    }
+    button:hover { filter: brightness(1.1); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .status { color: var(--dim); font-size: 0.9em; margin-left: auto; }
+    .status.error { color: var(--sell); }
+    .status.ok { color: var(--buy); }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 1em;
+      padding: 0.9em 1.2em;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin-bottom: 1em;
+    }
+    .slider-row.hidden { display: none; }
+    .slider-row .time {
+      font-size: 1.6em;
+      color: var(--gold);
+      font-weight: bold;
+      min-width: 120px;
+      font-variant-numeric: tabular-nums;
+    }
+    .slider-row input[type="range"] {
+      flex: 1;
+      accent-color: var(--gold);
+      height: 6px;
+    }
+    .slider-row .snap-info {
+      color: var(--dim);
+      font-variant-numeric: tabular-nums;
+      min-width: 110px;
+      text-align: right;
+    }
+    .play-btn {
+      background: var(--accent);
+      color: var(--bg);
+      padding: 0.45em 0.9em;
+      font-size: 0.9em;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+      gap: 1em;
+    }
+    .tile {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.8em 1em 0.7em;
+    }
+    .tile .title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--gold);
+      font-weight: bold;
+      margin-bottom: 0.5em;
+      padding-bottom: 0.5em;
+      border-bottom: 1px solid var(--border);
+    }
+    .tile .title .time-stamp {
+      color: var(--fg);
+      font-weight: normal;
+      font-variant-numeric: tabular-nums;
+    }
+    table.book {
+      width: 100%;
+      border-collapse: collapse;
+      font-variant-numeric: tabular-nums;
+    }
+    table.book th {
+      color: var(--dim);
+      font-weight: normal;
+      font-size: 0.75em;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 4px 4px;
+      text-align: right;
+    }
+    table.book th.ask-hdr { text-align: left; }
+    table.book th.sep { width: 8px; border-left: 1px solid var(--border); padding: 0; }
+    table.book td {
+      padding: 3px 4px;
+      text-align: right;
+      transition: background-color 0.35s ease-out;
+    }
+    table.book td.bid-num, table.book td.bid-price { color: var(--buy); }
+    table.book td.ask-num, table.book td.ask-price { color: var(--sell); text-align: left; }
+    table.book td.bid-num, table.book td.ask-num { opacity: 0.7; }
+    table.book td.sep { border-left: 1px solid var(--border); padding: 0; width: 8px; }
+    table.book tr.best td.bid-price,
+    table.book tr.best td.ask-price { font-weight: bold; }
+    table.book tr.best td.bid-price { background: var(--buy-bg); }
+    table.book tr.best td.ask-price { background: var(--sell-bg); }
+    table.book td.flash-buy { background: var(--buy); color: var(--bg) !important; }
+    table.book td.flash-sell { background: var(--sell); color: var(--bg) !important; }
+
+    .tile .footer {
+      margin-top: 0.5em;
+      padding-top: 0.5em;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      color: var(--dim);
+      font-size: 0.85em;
+    }
+    .tile .footer .mid { color: var(--gold); }
+    .empty-state {
+      text-align: center;
+      color: var(--dim);
+      padding: 4em 1em;
+      font-size: 0.95em;
+    }
+  </style>
+</head>
+<body>
+  <h1>◆ TSETMC Orderbook Replay</h1>
+
+  <div class="controls">
+    <div class="field">
+      <label>Tickers (comma-separated InsCodes)</label>
+      <input type="text" id="tickers" value="35425587644337450,34144395039913458,46700660505281786">
+    </div>
+    <div class="field"><label>Year (Jalali)</label><input type="number" id="year" value="1402"></div>
+    <div class="field"><label>Month</label><input type="number" id="month" value="3" min="1" max="12"></div>
+    <div class="field"><label>Day</label><input type="number" id="day" value="1" min="1" max="31"></div>
+    <button id="load">Load</button>
+    <span class="status" id="status">idle</span>
+  </div>
+
+  <div class="slider-row hidden" id="slider-row">
+    <button class="play-btn" id="play-btn">▶ Play</button>
+    <span class="time" id="time-display">--:--:--</span>
+    <input type="range" id="slider" min="0" max="0" value="0" step="1">
+    <span class="snap-info" id="snap-info">0 / 0</span>
+  </div>
+
+  <div class="grid" id="grid">
+    <div class="empty-state">Enter ticker IDs and a date, then click Load.</div>
+  </div>
+
+<script>
+  const API_BASE = window.location.origin;
+
+  const state = {
+    books: [],     // [{ ticker, date, count, snapshots }]
+    idx: 0,
+    playing: false,
+    playTimer: null,
+  };
+
+  // ── helpers ────────────────────────────────────────────────────────────
+  function fmtVol(n) {
+    if (!n) return '0';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return n.toString();
+  }
+  function fmtPrice(p) {
+    if (!p) return '—';
+    return Math.round(p).toLocaleString('en-US');
+  }
+  function setStatus(msg, kind = '') {
+    const el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = 'status ' + kind;
+  }
+
+  // ── fetch ──────────────────────────────────────────────────────────────
+  async function fetchBook(ticker, year, month, day) {
+    const url = `${API_BASE}/api/orderbook/${encodeURIComponent(ticker)}`
+              + `?year=${year}&month=${month}&day=${day}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`${ticker}: HTTP ${res.status} — ${body}`);
+    }
+    return await res.json();
+  }
+
+  async function load() {
+    const tickers = document.getElementById('tickers').value
+      .split(',').map(s => s.trim()).filter(Boolean);
+    const year = +document.getElementById('year').value;
+    const month = +document.getElementById('month').value;
+    const day = +document.getElementById('day').value;
+
+    if (!tickers.length) { setStatus('provide at least one ticker', 'error'); return; }
+
+    document.getElementById('load').disabled = true;
+    stopPlayback();
+    setStatus(`fetching ${tickers.length} ticker(s)...`);
+    document.getElementById('grid').innerHTML = '';
+    document.getElementById('slider-row').classList.add('hidden');
+    state.books = [];
+
+    const results = await Promise.all(tickers.map(t =>
+      fetchBook(t, year, month, day)
+        .then(d => ({ ok: true, data: d }))
+        .catch(e => ({ ok: false, ticker: t, err: e.message }))
+    ));
+
+    const errors = [];
+    for (const r of results) {
+      if (!r.ok) { errors.push(r.err); continue; }
+      if (!r.data.snapshots.length) { errors.push(`${r.data.ticker}: no data`); continue; }
+      state.books.push(r.data);
+    }
+
+    document.getElementById('load').disabled = false;
+
+    if (!state.books.length) {
+      setStatus(`no playable books (${errors.join('; ')})`, 'error');
+      document.getElementById('grid').innerHTML =
+        '<div class="empty-state">No data returned. Check the Jalali date and ticker IDs.</div>';
+      return;
+    }
+
+    const maxLen = Math.max(...state.books.map(b => b.snapshots.length));
+    const slider = document.getElementById('slider');
+    slider.max = maxLen - 1;
+    slider.value = 0;
+    state.idx = 0;
+    document.getElementById('slider-row').classList.remove('hidden');
+
+    buildGrid();
+    updateAll(null);
+
+    let msg = `loaded ${state.books.length} book(s) · ${maxLen} snapshots`;
+    if (errors.length) msg += ` · skipped: ${errors.length}`;
+    setStatus(msg, 'ok');
+  }
+
+  // ── render ─────────────────────────────────────────────────────────────
+  function buildGrid() {
+    const grid = document.getElementById('grid');
+    grid.innerHTML = '';
+    for (const book of state.books) {
+      const tile = document.createElement('div');
+      tile.className = 'tile';
+      tile.dataset.ticker = book.ticker;
+      tile.innerHTML = `
+        <div class="title">
+          <span>◆ ${book.ticker}</span>
+          <span class="time-stamp" data-f="time">--:--:--</span>
+        </div>
+        <table class="book">
+          <thead>
+            <tr>
+              <th>Cnt</th><th>Vol</th><th>Bid</th>
+              <th class="sep"></th>
+              <th class="ask-hdr">Ask</th><th class="ask-hdr">Vol</th><th class="ask-hdr">Cnt</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${[1,2,3,4,5].map(d => `
+              <tr data-depth="${d}">
+                <td class="bid-num" data-f="bc"></td>
+                <td class="bid-num" data-f="bv"></td>
+                <td class="bid-price" data-f="bp"></td>
+                <td class="sep"></td>
+                <td class="ask-price" data-f="sp"></td>
+                <td class="ask-num" data-f="sv"></td>
+                <td class="ask-num" data-f="sc"></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <div class="footer">
+          <span class="mid" data-f="mid">mid —</span>
+          <span data-f="spread">spread —</span>
+        </div>
+      `;
+      grid.appendChild(tile);
+    }
+  }
+
+  function updateTile(tile, snap, prevSnap) {
+    if (!snap) return;
+    tile.querySelector('[data-f="time"]').textContent = snap.time;
+
+    for (let i = 0; i < 5; i++) {
+      const d = snap.depths[i];
+      const pd = prevSnap ? prevSnap.depths[i] : null;
+      const row = tile.querySelector(`tr[data-depth="${d.depth}"]`);
+      row.classList.toggle('best', d.depth === 1);
+
+      const bpEl = row.querySelector('[data-f="bp"]');
+      const spEl = row.querySelector('[data-f="sp"]');
+      row.querySelector('[data-f="bc"]').textContent = d.buy_count || '';
+      row.querySelector('[data-f="bv"]').textContent = fmtVol(d.buy_volume);
+      bpEl.textContent = fmtPrice(d.buy_price);
+      spEl.textContent = fmtPrice(d.sell_price);
+      row.querySelector('[data-f="sv"]').textContent = fmtVol(d.sell_volume);
+      row.querySelector('[data-f="sc"]').textContent = d.sell_count || '';
+
+      // price-change flash
+      bpEl.classList.remove('flash-buy');
+      spEl.classList.remove('flash-sell');
+      if (pd && pd.buy_price !== d.buy_price) {
+        // force reflow to restart animation
+        void bpEl.offsetWidth;
+        bpEl.classList.add('flash-buy');
+      }
+      if (pd && pd.sell_price !== d.sell_price) {
+        void spEl.offsetWidth;
+        spEl.classList.add('flash-sell');
+      }
+    }
+
+    const best = snap.depths[0];
+    const midEl = tile.querySelector('[data-f="mid"]');
+    const spEl = tile.querySelector('[data-f="spread"]');
+    if (best.buy_price && best.sell_price) {
+      const mid = (best.buy_price + best.sell_price) / 2;
+      const spread = best.sell_price - best.buy_price;
+      const bps = Math.round(spread / mid * 10000);
+      midEl.textContent = `mid ${fmtPrice(mid)}`;
+      spEl.textContent = `spread ${fmtPrice(spread)} (${bps} bps)`;
+    } else {
+      midEl.textContent = 'mid —';
+      spEl.textContent = 'spread —';
+    }
+  }
+
+  function updateAll(prevIdx) {
+    const idx = state.idx;
+    const tiles = document.querySelectorAll('.tile');
+    const maxLen = Math.max(...state.books.map(b => b.snapshots.length));
+
+    tiles.forEach((tile, i) => {
+      const book = state.books[i];
+      const snap = book.snapshots[Math.min(idx, book.snapshots.length - 1)];
+      let prevSnap = null;
+      if (prevIdx != null && prevIdx !== idx) {
+        prevSnap = book.snapshots[Math.min(prevIdx, book.snapshots.length - 1)];
+      }
+      updateTile(tile, snap, prevSnap);
+    });
+
+    const refSnap = state.books[0].snapshots[Math.min(idx, state.books[0].snapshots.length - 1)];
+    document.getElementById('time-display').textContent = refSnap ? refSnap.time : '--:--:--';
+    document.getElementById('snap-info').textContent = `${idx + 1} / ${maxLen}`;
+  }
+
+  // ── playback ───────────────────────────────────────────────────────────
+  function stopPlayback() {
+    if (state.playTimer) clearInterval(state.playTimer);
+    state.playTimer = null;
+    state.playing = false;
+    const btn = document.getElementById('play-btn');
+    btn.textContent = '▶ Play';
+  }
+  function startPlayback() {
+    const slider = document.getElementById('slider');
+    const maxIdx = +slider.max;
+    state.playing = true;
+    document.getElementById('play-btn').textContent = '⏸ Pause';
+    state.playTimer = setInterval(() => {
+      if (state.idx >= maxIdx) { stopPlayback(); return; }
+      const prev = state.idx;
+      state.idx += 1;
+      slider.value = state.idx;
+      updateAll(prev);
+    }, 100);  // 10 fps
+  }
+  function togglePlayback() {
+    if (state.playing) stopPlayback(); else startPlayback();
+  }
+
+  // ── wiring ─────────────────────────────────────────────────────────────
+  document.getElementById('load').addEventListener('click', load);
+  document.getElementById('slider').addEventListener('input', (e) => {
+    const prev = state.idx;
+    state.idx = +e.target.value;
+    if (state.playing) stopPlayback();
+    updateAll(prev);
+  });
+  document.getElementById('play-btn').addEventListener('click', togglePlayback);
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT') return;
+    if (e.key === ' ') { e.preventDefault(); togglePlayback(); }
+    if (e.key === 'ArrowRight') {
+      const s = document.getElementById('slider');
+      const prev = state.idx;
+      state.idx = Math.min(+s.max, state.idx + 1);
+      s.value = state.idx;
+      updateAll(prev);
+    }
+    if (e.key === 'ArrowLeft') {
+      const s = document.getElementById('slider');
+      const prev = state.idx;
+      state.idx = Math.max(0, state.idx - 1);
+      s.value = state.idx;
+      updateAll(prev);
+    }
+  });
+</script>
+</body>
+</html>

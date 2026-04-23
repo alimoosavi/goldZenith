@@ -1,0 +1,21 @@
+[project]
+name = "goldzenith"
+version = "0.1.0"
+description = "TSETMC orderbook reconstruction, terminal replay, and HTTP API"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "finpy-tse>=1.2.10",
+    "jdatetime>=5.2.0",
+    "pandas>=3.0.2",
+    "requests>=2.33.1",
+    "uvicorn[standard]>=0.30",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tsetmc_orderbook"]
