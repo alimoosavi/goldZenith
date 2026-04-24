@@ -3,6 +3,8 @@
 import requests
 import jdatetime
 
+from settings import config
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) "
@@ -10,8 +12,6 @@ HEADERS = {
         "Chrome/39.0.2171.95 Safari/537.36"
     )
 }
-
-BEST_LIMITS_URL = "http://cdn.tsetmc.com/api/BestLimits/{ticker}/{deven}"
 
 
 def jalali_to_gregorian_int(jalali_date: str) -> int:
@@ -22,7 +22,7 @@ def jalali_to_gregorian_int(jalali_date: str) -> int:
 
 def fetch_raw(ticker_no: str, jalali_date: str) -> list:
     deven = jalali_to_gregorian_int(jalali_date)
-    url = BEST_LIMITS_URL.format(ticker=ticker_no, deven=deven)
+    url = config.best_limits_url.format(ticker=ticker_no, deven=deven)
     resp = requests.get(url, headers=HEADERS, timeout=20)
     resp.raise_for_status()
     return resp.json().get("bestLimitsHistory", [])

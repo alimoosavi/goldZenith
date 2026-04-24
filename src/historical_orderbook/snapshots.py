@@ -2,9 +2,7 @@
 
 import pandas as pd
 
-MARKET_OPEN = 84500     # 08:45:00  (stock pre-open start)
-MARKET_CLOSE = 153000   # 15:30:00  (widest: covers ETFs / funds that trade
-                        #           past the 12:30 equity close)
+from settings import config
 
 DEPTH_COLS = [
     "buy_count", "buy_volume", "buy_price",
@@ -63,12 +61,12 @@ def build_snapshots(raw: list) -> list:
     val_cols = [c for c in wide.columns if any(c.endswith(f"_{i}") for i in range(1, 6))]
     wide[val_cols] = wide[val_cols].ffill()
 
-    wide = wide[(wide["hEven"] >= MARKET_OPEN) & (wide["hEven"] <= MARKET_CLOSE)]
+    wide = wide[(wide["hEven"] >= config.market_open) & (wide["hEven"] <= config.market_close)]
     if wide.empty:
         return []
     wide["secs"] = wide["hEven"].apply(heven_to_seconds)
 
-    open_secs  = heven_to_seconds(MARKET_OPEN)
+    open_secs  = heven_to_seconds(config.market_open)
     last_secs  = int(wide["secs"].max())
 
     snapshots = []

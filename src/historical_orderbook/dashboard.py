@@ -3,11 +3,14 @@
 import curses
 import time
 
+from settings import config
+
 from .formatting import fmt_price, fmt_vol
 from .renderer import (
     C_BUY, C_BUY_BG, C_DIM, C_GOLD, C_SELL, C_SELL_BG, C_WHITE,
     init_colors,
 )
+from .snapshots import heven_to_seconds
 
 # ── tile geometry ─────────────────────────────────────────────────────────────
 TILE_W = 49                 # total tile width  (incl. left/right borders)
@@ -195,8 +198,8 @@ def draw_dashboard(stdscr, books, prev_snaps, idx, max_len, speed_ms, paused, da
     bottom = H - 2
     time_str = books[0]["snapshots"][min(idx, len(books[0]["snapshots"]) - 1)]["time"]
 
-    open_secs  = 8  * 3600 + 45 * 60
-    close_secs = 15 * 3600 + 30 * 60
+    open_secs  = heven_to_seconds(config.market_open)
+    close_secs = heven_to_seconds(config.market_close)
     h, m, s = map(int, time_str.split(":"))
     elapsed = (h * 3600 + m * 60 + s) - open_secs
     total_t = close_secs - open_secs

@@ -14,24 +14,29 @@ tasks:
   serve:
     desc: Run the FastAPI orderbook service (prod-ish, no reload)
     cmds:
-      - uv run uvicorn tsetmc_orderbook.api:app --host 0.0.0.0 --port 8000
+      - uv run uvicorn orderbook_api:app --host 0.0.0.0 --port 8000
 
   dev:
     desc: Run the FastAPI service with auto-reload
     cmds:
-      - uv run uvicorn tsetmc_orderbook.api:app --reload --reload-dir src --reload-dir static --host 127.0.0.1 --port 8000
-
-  terminal:
-    desc: Single-ticker curses replay (pass --ticker / --date / --speed via -- CLI_ARGS)
-    cmds:
-      - uv run python orderbook_terminal.py {{.CLI_ARGS}}
-
-  multi:
-    desc: Switchable multi-ticker curses replay
-    cmds:
-      - uv run python orderbook_multi.py {{.CLI_ARGS}}
+      - uv run uvicorn orderbook_api:app --reload --reload-dir src --reload-dir static --host 127.0.0.1 --port 8000
 
   dashboard:
     desc: Grid curses dashboard for many tickers at once
     cmds:
-      - uv run python orderbook_dashboard.py {{.CLI_ARGS}}
+      - uv run python scripts/orderbook_dashboard.py {{.CLI_ARGS}}
+
+  mid-csv:
+    desc: Export per-second mid-price CSV (to data/) — pass --tickers --year --month --day [--out] via -- CLI_ARGS
+    cmds:
+      - uv run python scripts/mid_prices.py export {{.CLI_ARGS}}
+
+  mid-plot:
+    desc: Plot a mid-price CSV — pass <csv-path> [--mode subplots|overlay|normalized] [--out FILE] via -- CLI_ARGS
+    cmds:
+      - uv run python scripts/mid_prices.py plot {{.CLI_ARGS}}
+
+  mid-all:
+    desc: Export + plot in one go — pass --tickers --year --month --day [--mode ...] via -- CLI_ARGS
+    cmds:
+      - uv run python scripts/mid_prices.py all {{.CLI_ARGS}}

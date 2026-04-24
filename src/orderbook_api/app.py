@@ -8,8 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .fetch import fetch_raw
-from .snapshots import build_snapshots
+from historical_orderbook import build_snapshots, fetch_raw
 
 STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
 
