@@ -26,7 +26,8 @@ import argparse
 import sys
 import time
 
-from historical_orderbook import build_snapshots, fetch_raw, play_dashboard
+from historical import TSETMCClient, TickerSnapshots
+from orderbook_preview import play_dashboard
 
 
 def main():
@@ -46,23 +47,20 @@ def main():
 
     speed_ms = int(1000 / args.speed)
 
+    client = TSETMCClient()
     books = []
     for t in tickers:
         print(f"Fetching {t} on {args.date} ...")
         try:
-            raw = fetch_raw(t, args.date)
+            snaps = client.fetch_orderbook_snapshots(t, args.date)
         except Exception as e:
             print(f"  ERROR: {e}")
             continue
-        if not raw:
-            print(f"  {t}: no data")
-            continue
-        snaps = build_snapshots(raw)
         if not snaps:
             print(f"  {t}: no trading-hours snapshots")
             continue
-        print(f"  {t}: {len(raw)} events → {len(snaps)} snapshots")
-        books.append({"ticker": t, "snapshots": snaps})
+        print(f"  {t}: {len(snaps)} snapshots")
+        books.append(TickerSnapshots(ticker=t, snapshots=snaps))
 
     if not books:
         print("No playable books.")

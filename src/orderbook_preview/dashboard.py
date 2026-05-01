@@ -3,6 +3,7 @@
 import curses
 import time
 
+from historical import heven_to_seconds
 from settings import config
 
 from .formatting import fmt_price, fmt_vol
@@ -10,7 +11,6 @@ from .renderer import (
     C_BUY, C_BUY_BG, C_DIM, C_GOLD, C_SELL, C_SELL_BG, C_WHITE,
     init_colors,
 )
-from .snapshots import heven_to_seconds
 
 # ── tile geometry ─────────────────────────────────────────────────────────────
 TILE_W = 49                 # total tile width  (incl. left/right borders)
@@ -67,9 +67,9 @@ def _make_bottom():
 
 
 def _fmt_footer(best):
-    if best["buy_price"] and best["sell_price"]:
-        spread = best["sell_price"] - best["buy_price"]
-        mid    = (best["buy_price"] + best["sell_price"]) / 2
+    if best.buy_price and best.sell_price:
+        spread = best.sell_price - best.buy_price
+        mid    = (best.buy_price + best.sell_price) / 2
         bps    = int(round(spread / mid * 10000)) if mid else 0
         return f"  mid {fmt_price(mid)}   spread {fmt_price(spread)} ({bps} bps)"
     return "  mid —   spread —"
@@ -78,7 +78,7 @@ def _fmt_footer(best):
 # ── tile renderer ─────────────────────────────────────────────────────────────
 
 def _draw_tile(stdscr, y, x, ticker, snap, prev_snap):
-    depths  = snap["depths"]
+    depths  = snap.depths
     best    = depths[0]
     inner_w = TILE_W - 2
 
@@ -88,7 +88,7 @@ def _draw_tile(stdscr, y, x, ticker, snap, prev_snap):
     hdr_sell  = curses.color_pair(C_SELL) | curses.A_BOLD
 
     # row 0: top border with title
-    _safe_addstr(stdscr, y, x, _make_top(ticker, snap["time"]), gold_bold)
+    _safe_addstr(stdscr, y, x, _make_top(ticker, snap.time), gold_bold)
 
     # row 1: column header — aligned to data columns
     _safe_addstr(stdscr, y + 1, x, "│", dim)
@@ -109,9 +109,9 @@ def _draw_tile(stdscr, y, x, ticker, snap, prev_snap):
         base    = curses.A_BOLD if is_best else 0
 
         changed_bp = bool(prev_snap and
-                          prev_snap["depths"][i]["buy_price"]  != d["buy_price"])
+                          prev_snap.depths[i].buy_price  != d.buy_price)
         changed_sp = bool(prev_snap and
-                          prev_snap["depths"][i]["sell_price"] != d["sell_price"])
+                          prev_snap.depths[i].sell_price != d.sell_price)
 
         buy_c  = curses.color_pair(C_BUY_BG  if changed_bp else C_BUY)  | base
         sell_c = curses.color_pair(C_SELL_BG if changed_sp else C_SELL) | base
@@ -124,18 +124,18 @@ def _draw_tile(stdscr, y, x, ticker, snap, prev_snap):
         _safe_addstr(stdscr, row, x + TILE_W - 1,     "│", dim)
 
         # ── bid side (23 cols)
-        bc = f"{d['buy_count']:>3}"
-        bv = f"{fmt_vol(d['buy_volume']):>6}"
-        bp = f"{fmt_price(d['buy_price']):>8}"
+        bc = f"{d.buy_count:>3}"
+        bv = f"{fmt_vol(d.buy_volume):>6}"
+        bp = f"{fmt_price(d.buy_price):>8}"
         left_prefix = f" {bc}  {bv}  "                        # 14 cols, up to price
         _safe_addstr(stdscr, row, x + 1,       left_prefix, buy_d)
         _safe_addstr(stdscr, row, x + 1 + 14,  bp,          buy_c)
         _safe_addstr(stdscr, row, x + 1 + 22,  " ",         buy_d)   # trailing pad
 
         # ── ask side (23 cols)
-        sp = f"{fmt_price(d['sell_price']):<8}"
-        sv = f"{fmt_vol(d['sell_volume']):<6}"
-        sc = f"{d['sell_count']:<3}"
+        sp = f"{fmt_price(d.sell_price):<8}"
+        sv = f"{fmt_vol(d.sell_volume):<6}"
+        sc = f"{d.sell_count:<3}"
         _safe_addstr(stdscr, row, x + MID_COL + 1,       " ",  sell_d)   # leading pad
         _safe_addstr(stdscr, row, x + MID_COL + 2,       sp,   sell_c)
         right_suffix = f"  {sv}  {sc} "                       # 14 cols
@@ -190,13 +190,13 @@ def draw_dashboard(stdscr, books, prev_snaps, idx, max_len, speed_ms, paused, da
         x = x0 + c * (TILE_W + TILE_GAP_X)
         if y + TILE_H > H - 3:
             continue
-        snaps = book["snapshots"]
+        snaps = book.snapshots
         snap = snaps[min(idx, len(snaps) - 1)]
-        _draw_tile(stdscr, y, x, book["ticker"], snap, prev_snaps[i])
+        _draw_tile(stdscr, y, x, book.ticker, snap, prev_snaps[i])
 
     # ── bottom status bar ────────────────────────────────────────────────
     bottom = H - 2
-    time_str = books[0]["snapshots"][min(idx, len(books[0]["snapshots"]) - 1)]["time"]
+    time_str = books[0].snapshots[min(idx, len(books[0].snapshots) - 1)].time
 
     open_secs  = heven_to_seconds(config.market_open)
     close_secs = heven_to_seconds(config.market_close)
@@ -235,7 +235,7 @@ def run_dashboard(stdscr, books, date, speed_ms):
     paused     = False
     prev_snaps = [None] * n
     last_tick  = time.monotonic()
-    max_len    = max(len(b["snapshots"]) for b in books)
+    max_len    = max(len(b.snapshots) for b in books)
 
     while True:
         key = stdscr.getch()
@@ -261,7 +261,7 @@ def run_dashboard(stdscr, books, date, speed_ms):
                 draw_dashboard(stdscr, books, prev_snaps, idx, max_len,
                                speed_ms, paused, date)
                 prev_snaps = [
-                    b["snapshots"][min(idx, len(b["snapshots"]) - 1)]
+                    b.snapshots[min(idx, len(b.snapshots) - 1)]
                     for b in books
                 ]
                 idx += 1

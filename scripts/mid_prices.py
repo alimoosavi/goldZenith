@@ -43,7 +43,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from historical_orderbook import build_snapshots, fetch_raw, write_mid_price_csv
+from historical import TSETMCClient, TickerSnapshots, write_mid_price_csv
 
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -84,24 +84,21 @@ def _resolve_input_csv(csv_arg: str, data_dir: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 def do_export(tickers: list[str], date: str, out_path: Path) -> Path | None:
+    client = TSETMCClient()
     books = []
     for t in tickers:
         print(f"Fetching {t} on {date} ...")
         try:
-            raw = fetch_raw(t, date)
+            snaps = client.fetch_orderbook_snapshots(t, date)
         except Exception as e:
             print(f"  ERROR: {e}")
             continue
-        if not raw:
-            print(f"  {t}: no data")
-            continue
-        snaps = build_snapshots(raw)
         if not snaps:
             print(f"  {t}: no trading-hours snapshots")
             continue
-        first, last = snaps[0]["time"], snaps[-1]["time"]
+        first, last = snaps[0].time, snaps[-1].time
         print(f"  {t}: {len(snaps)} snapshots ({first} → {last})")
-        books.append({"ticker": t, "snapshots": snaps})
+        books.append(TickerSnapshots(ticker=t, snapshots=snaps))
 
     if not books:
         print("No playable books.")

@@ -1,4 +1,4 @@
-"""FastAPI service exposing per-second orderbook snapshots over HTTP."""
+"""FastAPI service for goldZenith — HTTP endpoints over TSETMC market data."""
 
 from pathlib import Path
 from typing import Any
@@ -8,13 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from historical_orderbook import build_snapshots, fetch_raw
+from historical import TSETMCClient
 
 STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
 
 app = FastAPI(
-    title="TSETMC Orderbook API",
-    description="Reconstructed 5-depth orderbook snapshots for TSETMC instruments.",
+    title="goldZenith API",
+    description="HTTP endpoints over TSETMC market data — reconstructed orderbooks, trades, and derived datasets.",
     version="0.1.0",
 )
 
@@ -25,6 +25,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_client = TSETMCClient()
+
 
 def load_ticker_snapshots(ticker_id: str, year: int, month: int, day: int) -> dict[str, Any]:
     """
@@ -32,8 +34,7 @@ def load_ticker_snapshots(ticker_id: str, year: int, month: int, day: int) -> di
     Returns { ticker, date, count, snapshots } where date is Jalali YYYY-MM-DD.
     """
     date = f"{year:04d}-{month:02d}-{day:02d}"
-    raw = fetch_raw(ticker_id, date)
-    snapshots = build_snapshots(raw) if raw else []
+    snapshots = _client.fetch_orderbook_snapshots(ticker_id, date)
     return {
         "ticker": ticker_id,
         "date": date,

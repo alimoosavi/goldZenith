@@ -12,14 +12,14 @@ tasks:
       - uv sync
 
   serve:
-    desc: Run the FastAPI orderbook service (prod-ish, no reload)
+    desc: Run the FastAPI service (prod-ish, no reload)
     cmds:
-      - uv run uvicorn orderbook_api:app --host 0.0.0.0 --port 8000
+      - uv run uvicorn api:app --host 0.0.0.0 --port 8000
 
   dev:
     desc: Run the FastAPI service with auto-reload
     cmds:
-      - uv run uvicorn orderbook_api:app --reload --reload-dir src --reload-dir static --host 127.0.0.1 --port 8000
+      - uv run uvicorn api:app --reload --reload-dir src --reload-dir static --host 127.0.0.1 --port 8000
 
   dashboard:
     desc: Grid curses dashboard for many tickers at once
