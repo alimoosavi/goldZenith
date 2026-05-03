@@ -41,7 +41,7 @@ from signalrcore.hub_connection_builder import HubConnectionBuilder
 from redis_manager import RedisManager
 from settings import config
 
-from .base import BaseStreamer
+from ..base_streamer import BaseStreamer
 
 CONNECTION_ID_EVENT: str = "ConnectionId"
 
@@ -61,7 +61,7 @@ class PasargadStreamer(BaseStreamer):
     """Live single-ISIN streamer driven by the Pasargad SignalR hub.
 
         from redis_manager import RedisManager
-        from broker_stream import PasargadStreamer
+        from broker.pasargad import PasargadStreamer
         from settings import config
 
         rm = RedisManager(uri=config.redis_uri, port=config.redis_port)

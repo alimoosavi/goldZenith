@@ -16,19 +16,11 @@ constructed-output helpers (`fetch_orderbook_snapshots`, `fetch_trades`).
     snapshots = client.fetch_orderbook_snapshots("34144395039913458", "1402-03-01")
     trades    = client.fetch_trades("34144395039913458", "1402-03-01")
 
-`HistoricalStreamer` replays a stored ticker-day second-by-second from
-the local Parquet cache, yielding the prevailing orderbook snapshot and
-most recent trade on each tick. Useful for "simulated time" analyses
-and for feeding feature pipelines.
-
-    from historical import HistoricalStreamer
-
-    s = HistoricalStreamer("34144395039913458", "1402-03-01")
-    for tick in s.iter_ticks():
-        ...
-
-The time-of-day utilities (`heven_to_seconds`, `seconds_to_time`) are
-also re-exported for callers that want to bring their own transport.
+`StorageClient` persists the unified `OrderbookSnapshot` / `TradeEvent`
+records as `{isin}_{jalali}.parquet` files under
+`ORDERBOOKS_DIR` / `TRADES_DIR`. The time-of-day utilities
+(`heven_to_seconds`, `seconds_to_time`) are also re-exported for
+callers that want to bring their own transport.
 """
 
 from .analysis import (
@@ -46,14 +38,13 @@ from .schema import (
     TickerSnapshots,
     TradeEvent,
 )
-from .streamer import HistoricalStreamer, StreamTick
+from .storage import StorageClient
 
 __all__ = [
     "DepthLevel",
-    "HistoricalStreamer",
     "OrderbookEvent",
     "OrderbookSnapshot",
-    "StreamTick",
+    "StorageClient",
     "TSETMCClient",
     "TickerSnapshots",
     "TradeEvent",

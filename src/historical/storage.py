@@ -1,10 +1,15 @@
 """Parquet-backed persistence for historical orderbook + trade data.
 
-`StorageClient` maps `(ticker, jalali_date)` to one Parquet file per
-stream — `{ticker}_{jalali_date}.parquet` under `config.orderbooks_dir`
+`StorageClient` maps `(isin, jalali_date)` to one Parquet file per
+stream — `{isin}_{jalali_date}.parquet` under `config.orderbooks_dir`
 or `config.trades_dir`. The on-disk schema is flat and columnar so
-later analytics (DuckDB, pandas, etc.) can scan files directly without
+later analytics (DuckDB, polars, etc.) can scan files directly without
 going through this client.
+
+Files are keyed by ISIN (the canonical project-wide identifier — same
+key the broker streamers use as the Redis-stream prefix). Translation
+to TSETMC's numeric `ins_code` happens at the CDN boundary in callers
+(via `instruments.InstrumentRegistry`); this layer only sees ISIN.
 
 Round-tripping uses the typed records from `historical.schema`:
 `list[OrderbookSnapshot]` and `list[TradeEvent]` go in and come back
@@ -20,8 +25,9 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from historical import DepthLevel, OrderbookSnapshot, TradeEvent
 from settings import config
+
+from .schema import DepthLevel, OrderbookSnapshot, TradeEvent
 
 _TRADES_SCHEMA = pa.schema([
     pa.field("nTran",    pa.int64()),
@@ -45,13 +51,13 @@ _ORDERBOOK_SCHEMA = pa.schema(
 
 
 class StorageClient:
-    """Persist and load `(ticker, jalali_date)` snapshots / trades as Parquet.
+    """Persist and load `(isin, jalali_date)` snapshots / trades as Parquet.
 
         store = StorageClient()
-        store.save_orderbook(ticker, "1405-01-11", snapshots)
-        store.save_trades(ticker,    "1405-01-11", trades)
-        snapshots = store.load_orderbook(ticker, "1405-01-11")
-        trades    = store.load_trades(ticker,    "1405-01-11")
+        store.save_orderbook(isin, "1405-01-11", snapshots)
+        store.save_trades(isin,    "1405-01-11", trades)
+        snapshots = store.load_orderbook(isin, "1405-01-11")
+        trades    = store.load_trades(isin,    "1405-01-11")
 
     `orderbooks_dir` and `trades_dir` default to the values on
     `settings.config`; pass overrides for tests or alternate roots.
@@ -72,21 +78,21 @@ class StorageClient:
 
     # ── path helpers ────────────────────────────────────────────────────
 
-    def orderbook_path(self, ticker: str, jalali_date: str) -> Path:
-        return self.orderbooks_dir / f"{ticker}_{jalali_date}.parquet"
+    def orderbook_path(self, isin: str, jalali_date: str) -> Path:
+        return self.orderbooks_dir / f"{isin}_{jalali_date}.parquet"
 
-    def trades_path(self, ticker: str, jalali_date: str) -> Path:
-        return self.trades_dir / f"{ticker}_{jalali_date}.parquet"
+    def trades_path(self, isin: str, jalali_date: str) -> Path:
+        return self.trades_dir / f"{isin}_{jalali_date}.parquet"
 
-    def has_orderbook(self, ticker: str, jalali_date: str) -> bool:
-        return self.orderbook_path(ticker, jalali_date).is_file()
+    def has_orderbook(self, isin: str, jalali_date: str) -> bool:
+        return self.orderbook_path(isin, jalali_date).is_file()
 
-    def has_trades(self, ticker: str, jalali_date: str) -> bool:
-        return self.trades_path(ticker, jalali_date).is_file()
+    def has_trades(self, isin: str, jalali_date: str) -> bool:
+        return self.trades_path(isin, jalali_date).is_file()
 
     # ── trades ──────────────────────────────────────────────────────────
 
-    def save_trades(self, ticker: str, jalali_date: str, trades: list[TradeEvent]) -> Path:
+    def save_trades(self, isin: str, jalali_date: str, trades: list[TradeEvent]) -> Path:
         table = pa.table(
             {
                 "nTran":    [t.nTran    for t in trades],
@@ -97,12 +103,12 @@ class StorageClient:
             },
             schema=_TRADES_SCHEMA,
         )
-        path = self.trades_path(ticker, jalali_date)
+        path = self.trades_path(isin, jalali_date)
         pq.write_table(table, path, compression=self.compression)
         return path
 
-    def load_trades(self, ticker: str, jalali_date: str) -> list[TradeEvent]:
-        table = pq.read_table(self.trades_path(ticker, jalali_date))
+    def load_trades(self, isin: str, jalali_date: str) -> list[TradeEvent]:
+        table = pq.read_table(self.trades_path(isin, jalali_date))
         nTran    = table["nTran"].to_pylist()
         hEven    = table["hEven"].to_pylist()
         volume   = table["volume"].to_pylist()
@@ -119,7 +125,7 @@ class StorageClient:
     # ── orderbook ───────────────────────────────────────────────────────
 
     def save_orderbook(
-        self, ticker: str, jalali_date: str, snapshots: list[OrderbookSnapshot]
+        self, isin: str, jalali_date: str, snapshots: list[OrderbookSnapshot]
     ) -> Path:
         cols: dict[str, list] = {"time": [s.time for s in snapshots]}
         for d in range(1, 6):
@@ -131,12 +137,19 @@ class StorageClient:
             cols[f"sell_count_{d}"]  = [s.depths[d - 1].sell_count  for s in snapshots]
 
         table = pa.table(cols, schema=_ORDERBOOK_SCHEMA)
-        path = self.orderbook_path(ticker, jalali_date)
+        path = self.orderbook_path(isin, jalali_date)
         pq.write_table(table, path, compression=self.compression)
         return path
 
-    def load_orderbook(self, ticker: str, jalali_date: str) -> list[OrderbookSnapshot]:
-        table = pq.read_table(self.orderbook_path(ticker, jalali_date))
+    def load_orderbook(self, isin: str, jalali_date: str) -> list[OrderbookSnapshot]:
+        return self.load_orderbook_from_path(self.orderbook_path(isin, jalali_date))
+
+    @staticmethod
+    def load_orderbook_from_path(path: Path | str) -> list[OrderbookSnapshot]:
+        """Load snapshots from any Parquet file matching `_ORDERBOOK_SCHEMA`,
+        regardless of filename convention. Useful for replay tooling that
+        wants to point at a specific historical day on disk."""
+        table = pq.read_table(Path(path))
         times = table["time"].to_pylist()
         per_depth = {
             d: {

@@ -40,3 +40,13 @@ tasks:
     desc: Export + plot in one go — pass --tickers --year --month --day [--mode ...] via -- CLI_ARGS
     cmds:
       - uv run python scripts/mid_prices.py all {{.CLI_ARGS}}
+
+  stream:
+    desc: Run a broker streamer (default pasargad) — pass --broker [--mock --file --isin --speed] via -- CLI_ARGS
+    cmds:
+      - uv run python scripts/broker_signalr_stream.py {{.CLI_ARGS}}
+
+  feed:
+    desc: Subscribe to {isin}:orderbook streams — pass --broker [--isins ... | --mock --mock-file ISIN=PATH ... --speed N] via -- CLI_ARGS
+    cmds:
+      - uv run python scripts/run_feed.py {{.CLI_ARGS}}

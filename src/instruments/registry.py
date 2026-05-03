@@ -9,7 +9,7 @@ two halves of this codebase:
   - Pasargad and other brokers' SignalR feeds, plus the on-disk
     Parquet filenames and Redis stream keys, are keyed on the
     standardized 12-char `isin` (e.g. ``IRTKMOFD0001``) — see
-    `broker_stream.PasargadStreamer` and `storage.StorageClient`.
+    `broker.pasargad.PasargadStreamer` and `historical.StorageClient`.
 
 The registry pins both ids together — plus a human-readable `symbol`
 and `name` — in one place, so callers only have to know one identifier
