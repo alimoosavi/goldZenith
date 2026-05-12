@@ -3,9 +3,6 @@
 import curses
 import time
 
-from historical import heven_to_seconds
-from settings import config
-
 from .formatting import fmt_price, fmt_vol
 from .renderer import (
     C_BUY, C_BUY_BG, C_DIM, C_GOLD, C_SELL, C_SELL_BG, C_WHITE,
@@ -198,12 +195,7 @@ def draw_dashboard(stdscr, books, prev_snaps, idx, max_len, speed_ms, paused, da
     bottom = H - 2
     time_str = books[0].snapshots[min(idx, len(books[0].snapshots) - 1)].time
 
-    open_secs  = heven_to_seconds(config.market_open)
-    close_secs = heven_to_seconds(config.market_close)
-    h, m, s = map(int, time_str.split(":"))
-    elapsed = (h * 3600 + m * 60 + s) - open_secs
-    total_t = close_secs - open_secs
-    pct = max(0.0, min(1.0, elapsed / total_t))
+    pct = max(0.0, min(1.0, idx / max(1, max_len - 1)))
     bar_w = max(10, W - 4)
     filled = int(pct * bar_w)
 

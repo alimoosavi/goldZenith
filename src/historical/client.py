@@ -129,11 +129,9 @@ class TSETMCClient:
 
         Walks events grouped by their `(hEven, refID)` "tick" — broker-side
         sub-second ordering — applying each per-depth update to a running
-        state. After every in-window tick the full 5-depth state is
-        captured, then forward-filled second-by-second from
-        `config.market_open` through the last in-window tick. Instruments
-        that close at 12:30 naturally stop there; ETFs and funds that
-        trade into the afternoon keep going.
+        state. After every tick the full 5-depth state is captured, then
+        forward-filled second-by-second from the first observed tick
+        through the last.
         """
         if not events:
             return []
@@ -152,19 +150,18 @@ class TSETMCClient:
                 ev = sorted_events[i]
                 state[ev.depth] = ev
                 i += 1
-            if config.market_open <= h_even <= config.market_close:
-                ticks.append((heven_to_seconds(h_even), dict(state)))
+            ticks.append((heven_to_seconds(h_even), dict(state)))
 
         if not ticks:
             return []
 
-        open_secs = heven_to_seconds(config.market_open)
+        first_secs = ticks[0][0]
         last_secs = ticks[-1][0]  # ticks ascend by hEven, so by secs too
 
         snapshots: list[OrderbookSnapshot] = []
         last_state: dict[int, OrderbookEvent | None] | None = None
         j = 0
-        for sec in range(open_secs, last_secs + 1):
+        for sec in range(first_secs, last_secs + 1):
             while j < len(ticks) and ticks[j][0] <= sec:
                 last_state = ticks[j][1]
                 j += 1

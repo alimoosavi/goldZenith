@@ -3,10 +3,11 @@
 `OrderbookFeed` is a pure consumer — it doesn't know whether the events
 it reads originated from a live SignalR client or a parquet-replay
 mock. It opens a single multi-stream `XREAD` against every
-`{isin}:orderbook` key in `isins`, decodes each entry's `data` JSON
-through the selected broker's `from_bl` adapter, wraps the result in a
-typed `BookUpdate(isin, ts, snapshot, stream_id)`, and dispatches to
-the user-provided `on_update` callback in arrival order.
+`{broker}:{isin}:orderbook` key in `isins` (key format owned by the
+broker's `orderbook_stream_key` classmethod), decodes each entry's
+`data` JSON through the selected broker's `from_bl` adapter, wraps the
+result in a typed `BookUpdate(isin, ts, snapshot, stream_id)`, and
+dispatches to the user-provided `on_update` callback in arrival order.
 
 Selecting the broker is a string lookup against `broker.registry.BROKERS`
 so the feed is broker-agnostic at the call site:
@@ -48,8 +49,8 @@ class BookUpdate:
 
 
 class OrderbookFeed:
-    """Subscribe to `{isin}:orderbook` streams across N instruments and
-    dispatch typed `BookUpdate`s to a callback.
+    """Subscribe to `{broker}:{isin}:orderbook` streams across N instruments
+    and dispatch typed `BookUpdate`s to a callback.
 
     `block_ms=0` would block forever inside redis-py; using a finite
     timeout (default 1000ms) lets `stop()` take effect in <1s without
@@ -75,6 +76,11 @@ class OrderbookFeed:
             raise ValueError(
                 f"OrderbookFeed: unknown broker {broker!r}; known: {sorted(BROKERS)}"
             )
+        if BROKERS[broker].from_bl is None:
+            raise ValueError(
+                f"OrderbookFeed: broker {broker!r} has no `from_bl` adapter "
+                f"registered — it can produce streams but the feed can't decode them"
+            )
 
         self.broker_entry: BrokerEntry = BROKERS[broker]
         self.isins: list[str] = list(isins)
@@ -82,10 +88,11 @@ class OrderbookFeed:
         self.redis = redis_manager or RedisManager(
             uri=config.redis_uri, port=config.redis_port,
         )
+        key_for = self.broker_entry.streamer_cls.orderbook_stream_key
         self.last_ids: dict[str, str] = (
             dict(last_ids)
             if last_ids
-            else {f"{i}:orderbook": "$" for i in self.isins}
+            else {key_for(i): "$" for i in self.isins}
         )
         self.block_ms = block_ms
         self.count = count

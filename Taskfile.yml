@@ -42,7 +42,7 @@ tasks:
       - uv run python scripts/mid_prices.py all {{.CLI_ARGS}}
 
   stream:
-    desc: Run a broker streamer (default pasargad) — pass --broker [--mock --file --isin --speed] via -- CLI_ARGS
+    desc: Run a broker streamer for every ISIN in INSTRUMENTS_FILE — pass --broker [--isin OVERRIDE ... | --mock --file --speed] via -- CLI_ARGS
     cmds:
       - uv run python scripts/broker_signalr_stream.py {{.CLI_ARGS}}
 
@@ -50,3 +50,13 @@ tasks:
     desc: Subscribe to {isin}:orderbook streams — pass --broker [--isins ... | --mock --mock-file ISIN=PATH ... --speed N] via -- CLI_ARGS
     cmds:
       - uv run python scripts/run_feed.py {{.CLI_ARGS}}
+
+  persister:
+    desc: Persist orderbook updates to JSONL (data/ticks/{isin}/{date}.jsonl) — pass --broker --isin ... [--out --flush-every] via -- CLI_ARGS
+    cmds:
+      - uv run python scripts/run_persister.py {{.CLI_ARGS}}
+
+  arb-detector:
+    desc: Detect arbitrage signals from orderbook streams — pass --broker --isin ... via -- CLI_ARGS
+    cmds:
+      - uv run python scripts/run_arb_detector.py {{.CLI_ARGS}}

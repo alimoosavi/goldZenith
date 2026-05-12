@@ -103,7 +103,7 @@ def main() -> None:
         isins = [isin for isin, _ in pairs]
         for isin, path in pairs:
             s = broker.mock_streamer_cls(
-                isin=isin, redis_manager=rm,
+                isins=[isin], redis_manager=rm,
                 parquet_path=path, speed=args.speed,
             )
             streamers.append(s)

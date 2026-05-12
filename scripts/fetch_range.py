@@ -2,7 +2,7 @@
 
 Walks every Jalali day in `[--start, --end]` (inclusive), pulls the
 per-second 5-depth orderbook snapshots and tick-by-tick trades for
-`--isin`, and writes them through `historical.StorageClient` as
+one or more ISINs, and writes them through `historical.StorageClient` as
 `{isin}_{jalali}.parquet` under `ORDERBOOKS_DIR` / `TRADES_DIR`. Days
 already on disk are skipped unless `--force` is passed.
 
@@ -11,16 +11,23 @@ resolves it to TSETMC's numeric `ins_code` via `InstrumentRegistry`
 just before each CDN call. The registry entry must therefore have
 `ins_code` populated.
 
-Example:
+Examples:
 
+    # Single ISIN
     uv run python scripts/fetch_range.py \\
         --isin IRTKMOFD0001 \\
+        --start 1405-01-01 --end 1405-02-01
+
+    # Multiple ISINs from JSON file
+    uv run python scripts/fetch_range.py \\
+        --isin-file isins.json \\
         --start 1405-01-01 --end 1405-02-01
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import timedelta
 
@@ -43,6 +50,20 @@ def jalali_daterange(start: str, end: str) -> list[str]:
         out.append(f"{cur.year:04d}-{cur.month:02d}-{cur.day:02d}")
         cur += timedelta(days=1)
     return out
+
+
+def resolve_isin(registry: InstrumentRegistry, isin: str) -> tuple[str, str]:
+    """Resolve ISIN to (isin, ins_code), validating registry entry exists and has ins_code.
+
+    Returns (isin, ins_code) on success; exits with error message on failure.
+    """
+    try:
+        instrument = registry.by_isin(isin)
+    except KeyError:
+        sys.exit(f"ISIN {isin} is not in the registry ({registry.path})")
+    if not instrument.ins_code:
+        sys.exit(f"registry entry for {isin} has no ins_code — backfill it before fetching")
+    return isin, instrument.ins_code
 
 
 def fetch_one(
@@ -70,34 +91,49 @@ def fetch_one(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--isin",  required=True, help="12-char ISIN (must be in the registry)")
+    isin_group = ap.add_mutually_exclusive_group(required=True)
+    isin_group.add_argument("--isin", help="Single 12-char ISIN (must be in the registry)")
+    isin_group.add_argument("--isin-file", metavar="PATH",
+                           help="JSON file containing list of ISINs")
     ap.add_argument("--start", required=True, help="Jalali start date YYYY-MM-DD (inclusive)")
     ap.add_argument("--end",   required=True, help="Jalali end date YYYY-MM-DD (inclusive)")
     ap.add_argument("--force", action="store_true",
                     help="Re-fetch and overwrite even if a cached file exists")
     args = ap.parse_args()
 
+    # Load ISINs from either --isin or --isin-file
+    if args.isin:
+        isins = [args.isin]
+    else:
+        try:
+            with open(args.isin_file) as f:
+                isins = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            sys.exit(f"Failed to load {args.isin_file}: {e}")
+        if not isinstance(isins, list) or not isins:
+            sys.exit(f"{args.isin_file} must contain a non-empty JSON list of ISINs")
+
+    # Resolve all ISINs upfront (fail-fast)
     registry = InstrumentRegistry()
-    try:
-        instrument = registry.by_isin(args.isin)
-    except KeyError:
-        sys.exit(f"--isin {args.isin} is not in the registry ({registry.path})")
-    if not instrument.ins_code:
-        sys.exit(
-            f"registry entry for {args.isin} has no ins_code — backfill it before fetching"
-        )
+    isin_pairs = []
+    for isin in isins:
+        isin_pairs.append(resolve_isin(registry, isin))
 
     client = TSETMCClient()
     store = StorageClient()
-
     dates = jalali_daterange(args.start, args.end)
-    label = f"{instrument.symbol or instrument.isin} ({instrument.ins_code})"
-    print(f"{label}: {len(dates)} day(s) {dates[0]} → {dates[-1]}")
+
+    print(f"Fetching {len(isins)} ISIN(s): {len(dates)} day(s) {dates[0]} → {dates[-1]}")
     print(f"  orderbooks → {store.orderbooks_dir}")
     print(f"  trades     → {store.trades_dir}\n")
 
-    for date in dates:
-        fetch_one(client, store, args.isin, instrument.ins_code, date, args.force)
+    for isin, ins_code in isin_pairs:
+        instrument = registry.by_isin(isin)
+        label = f"{instrument.symbol or instrument.isin} ({ins_code})"
+        print(f"• {label}")
+        for date in dates:
+            fetch_one(client, store, isin, ins_code, date, args.force)
+        print()
 
 
 if __name__ == "__main__":

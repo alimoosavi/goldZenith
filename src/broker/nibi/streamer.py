@@ -1,31 +1,17 @@
-"""Live Pasargad SignalR streamer — multiplexes a batch of ISINs over one hub.
+"""Live Nibi SignalR streamer — multiplexes a batch of ISINs over one hub.
 
-One `PasargadStreamer` opens a single WebSocket to the Pasargad SignalR
-hub, runs the connection-id handshake, then POSTs **the full ISIN list**
-to the REST `SubscribeInstrument` endpoint in a single call. Every
+One `NibiStreamer` opens a single WebSocket to the Nibi SignalR hub,
+runs the connection-id handshake, then POSTs **the full ISIN list** to
+the REST `SubscribeInstrument` endpoint in a single call. Every
 incoming BL payload carries an `instrumentId` field, which the streamer
 uses to route the event onto the correct per-ISIN Redis stream
-(`pasargad:{isin}:orderbook`).
+(`nibi:{isin}:orderbook`).
 
-Pasargad-style handshake:
-
-  1. Open WS at  wss://pasargad-signal.tsetab.ir/SignalHub/?id=<random>&access_token=<token>
-  2. signalrcore sends the JSON SignalR handshake `{"protocol":"json","version":1}\\x1e`.
-  3. Server pushes a hub-method invocation back:
-         {"type":1,"target":"ConnectionId","arguments":["<realConnectionId>"]}
-  4. POST that id to  <PASARGAD_API_BASE_URL>/api/Subscribes/SubscribeInstrument
-     with `{"ConnectionId": "<realConnectionId>", "InstrumentIds": [<isins>]}`.
-  5. BL invocations (5-depth orderbook updates) start flowing.
-
-We DO NOT enable signalrcore's built-in auto-reconnect: it would silently
-re-open the socket without re-running our REST subscribe step. The
-supervisor loop in `run()` rebuilds the hub end-to-end on disconnect;
-the fresh handshake re-fires the `ConnectionId` event, which re-fires
-`_subscribe` with the full ISIN batch.
-
-The heartbeat thread sends `{"type":6}` (SignalR ping) on the underlying
-websocket every `heartbeat_interval` seconds (default 60s) to keep the
-broker's load-balancer from closing the socket during quiet periods.
+Multiplexing is required because the broker auth token has a cap on
+the number of concurrent hub connections. The per-connection batch
+size is configured by `config.nibi_instruments_per_connection`; callers
+chunk the full registry into batches of that size and spawn one
+`NibiStreamer` per chunk.
 """
 
 from __future__ import annotations
@@ -52,18 +38,21 @@ _RECORD_SEPARATOR: str = "\x1e"
 MessageHandler = Callable[[str, list], None]
 
 
-class PasargadStreamer(BaseStreamer):
-    """Live multi-ISIN streamer driven by one Pasargad SignalR hub connection.
+class NibiStreamer(BaseStreamer):
+    """Live multi-ISIN streamer driven by one Nibi SignalR hub connection.
 
         from redis_manager import RedisManager
-        from broker.pasargad import PasargadStreamer
+        from broker.nibi import NibiStreamer
+        from settings import config
 
-        PasargadStreamer(
-            isins=["IRTKMOFD0001", "IRTKLOTF0001"],
+        rm = RedisManager(uri=config.redis_uri, port=config.redis_port)
+        rm.ping()
+        NibiStreamer(
+            isins=["IRTKMOFD0001", "IRTKROBA0001", "IRTKZARA0001"],
             redis_manager=rm,
         ).run()
 
-    Auth defaults to `config.pasargad_auth_token` / `config.pasargad_cookie`;
+    Auth defaults to `config.nibi_auth_token` / `config.nibi_cookie`;
     pass `auth_token=` / `cookie=` to override. `on_message` receives
     `(event, payload)` after each successful Redis publish.
     """
@@ -83,16 +72,20 @@ class PasargadStreamer(BaseStreamer):
     ) -> None:
         super().__init__(isins=isins, redis_manager=redis_manager, stream_maxlen=stream_maxlen)
 
-        token = auth_token if auth_token is not None else config.pasargad_auth_token
+        token = auth_token if auth_token is not None else config.nibi_auth_token
         if not token:
-            raise ValueError("PasargadStreamer: PASARGAD_AUTH_TOKEN is empty")
+            raise ValueError("NibiStreamer: NIBI_AUTH_TOKEN is empty")
+        if not config.nibi_signalr_url:
+            raise ValueError("NibiStreamer: NIBI_SIGNALR_URL is empty")
+        if not config.nibi_api_base_url:
+            raise ValueError("NibiStreamer: NIBI_API_BASE_URL is empty")
         if heartbeat_interval <= 0:
-            raise ValueError("PasargadStreamer: heartbeat_interval must be > 0")
+            raise ValueError("NibiStreamer: heartbeat_interval must be > 0")
 
-        self.hub_url: str = config.pasargad_signalr_url
-        self.api_base_url: str = config.pasargad_api_base_url
+        self.hub_url: str = config.nibi_signalr_url
+        self.api_base_url: str = config.nibi_api_base_url
         self.auth_token: str = token
-        self.cookie: str = cookie if cookie is not None else config.pasargad_cookie
+        self.cookie: str = cookie if cookie is not None else config.nibi_cookie
         self.supervisor_interval = supervisor_interval
         self.reconnect_delay = reconnect_delay
         self.heartbeat_interval = heartbeat_interval
@@ -109,7 +102,7 @@ class PasargadStreamer(BaseStreamer):
 
     @classmethod
     def orderbook_stream_key(cls, isin: str) -> str:
-        return f"pasargad:{isin}:orderbook"
+        return f"nibi:{isin}:orderbook"
 
     # ── hub plumbing ─────────────────────────────────────────────────────
 
@@ -168,6 +161,13 @@ class PasargadStreamer(BaseStreamer):
 
     @staticmethod
     def _isin_of(message) -> str | None:
+        """Pull `instrumentId` out of a Nibi BL outer envelope.
+
+        Envelope shape: `[{"id": ..., "instrumentId": "<isin>", "data": [...]}]`.
+        Returns `None` if the message doesn't match — that's logged by
+        the caller, not raised, so one malformed event can't kill the
+        hub thread.
+        """
         try:
             return str(message[0]["instrumentId"])
         except (IndexError, KeyError, TypeError):
@@ -179,7 +179,7 @@ class PasargadStreamer(BaseStreamer):
         self._heartbeat_stop.clear()
         self._heartbeat_thread = threading.Thread(
             target=self._heartbeat_loop,
-            name=f"pasargad-heartbeat-{self._log_prefix}",
+            name=f"nibi-heartbeat-{self._log_prefix}",
             daemon=True,
         )
         self._heartbeat_thread.start()
@@ -244,9 +244,6 @@ class PasargadStreamer(BaseStreamer):
             return "unknown"
 
     def run(self) -> None:
-        """Blocking. Runs until `stop()` is called or KeyboardInterrupt fires
-        (the latter only in main-thread direct use; thread runners get
-        signalled via `stop()` instead)."""
         self._run_stop.clear()
         self._start_heartbeat()
         try:
