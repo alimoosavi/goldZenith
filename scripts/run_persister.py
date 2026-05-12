@@ -11,6 +11,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import logging
 import signal
 import sys
 from pathlib import Path
@@ -19,7 +20,10 @@ from broker import BROKERS
 from consumers import OrderbookPersister
 from instruments import InstrumentRegistry
 from redis_manager import RedisManager
-from settings import config
+from settings import config, setup_logging
+
+setup_logging()
+logger = logging.getLogger("persister")
 
 
 def main() -> None:
@@ -67,15 +71,13 @@ def main() -> None:
     )
     signal.signal(signal.SIGINT, lambda *_: persister.stop())
 
-    print(
-        f"[persister] broker={args.broker} isins={isins} → {args.out} "
-        f"(flush_every={args.flush_every})",
-        file=sys.stderr,
+    logger.info(
+        "broker=%s isins=%s → %s (flush_every=%d)",
+        args.broker, isins, args.out, args.flush_every,
     )
     persister.run()
-    print(
-        f"[persister] wrote {persister.written} entries: {persister.counts_by_isin}",
-        file=sys.stderr,
+    logger.info(
+        "wrote %d entries: %s", persister.written, persister.counts_by_isin,
     )
 
 

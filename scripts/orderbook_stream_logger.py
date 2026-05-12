@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import signal
 import sys
 from pathlib import Path
@@ -31,7 +32,10 @@ from pathlib import Path
 from broker import BROKERS, get_broker
 from instruments import InstrumentRegistry
 from redis_manager import RedisManager
-from settings import config
+from settings import config, setup_logging
+
+setup_logging()
+logger = logging.getLogger("log-tail")
 
 
 def main() -> None:
@@ -89,13 +93,13 @@ def main() -> None:
     def _sigint(_sig, _frame):
         nonlocal stop
         stop = True
-        print("\n[logger] interrupted, stopping", file=sys.stderr)
+        logger.info("interrupted, stopping")
     signal.signal(signal.SIGINT, _sigint)
 
-    print(
-        f"[logger] streams={list(streams)} → {args.out} "
-        f"({'from-start' if args.from_start else 'only-new'})",
-        file=sys.stderr,
+    logger.info(
+        "streams=%s → %s (%s)",
+        list(streams), args.out,
+        "from-start" if args.from_start else "only-new",
     )
 
     written = 0
@@ -122,7 +126,7 @@ def main() -> None:
                     written += 1
                 fh.flush()
 
-    print(f"[logger] wrote {written} events to {args.out}", file=sys.stderr)
+    logger.info("wrote %d events to %s", written, args.out)
 
 
 if __name__ == "__main__":

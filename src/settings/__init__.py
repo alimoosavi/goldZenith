@@ -31,6 +31,8 @@ Environment variables (case-insensitive; also read from <repo>/.env):
 
 from __future__ import annotations
 
+import logging
+import sys
 from pathlib import Path
 
 from pydantic import field_validator
@@ -57,8 +59,8 @@ class Config(BaseSettings):
     pasargad_auth_token: str = ""
     pasargad_cookie: str = ""
 
-    nibi_signalr_url: str = ""
-    nibi_api_base_url: str = ""
+    nibi_hub_url: str = ""
+    nibi_subscribe_url: str = ""
     nibi_auth_token: str = ""
     nibi_cookie: str = ""
 
@@ -78,7 +80,7 @@ class Config(BaseSettings):
 
     instruments_file: Path = Path("data/instruments.yaml")
 
-    @field_validator("tsetmc_cdn_base_url", "pasargad_api_base_url", "nibi_api_base_url")
+    @field_validator("tsetmc_cdn_base_url", "pasargad_api_base_url", "nibi_subscribe_url")
     @classmethod
     def _strip_trailing_slash(cls, v: str) -> str:
         return v.rstrip("/")
@@ -93,4 +95,29 @@ class Config(BaseSettings):
 config = Config()
 
 
-__all__ = ["Config", "config"]
+def setup_logging(level: str | int = "INFO") -> None:
+    """Configure the root logger once with a standard project-wide format.
+
+    Idempotent — repeat calls are no-ops, so every script can call it at
+    the top without worrying about double-configuration. Emits to stderr:
+
+        2026-05-12 10:30:15 INFO    broker.nibi.streamer [IRTKMOFD0001+4] subscribe instruments: HTTP 200 for 5 isin(s)
+
+    Override per-logger after this call via
+    `logging.getLogger(name).setLevel(...)`.
+    """
+    root = logging.getLogger()
+    if root.handlers:
+        return
+    handler = logging.StreamHandler(stream=sys.stderr)
+    handler.setFormatter(
+        logging.Formatter(
+            fmt="%(asctime)s %(levelname)-7s %(name)s %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    root.setLevel(level)
+    root.addHandler(handler)
+
+
+__all__ = ["Config", "config", "setup_logging"]

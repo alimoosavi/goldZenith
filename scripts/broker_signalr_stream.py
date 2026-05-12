@@ -29,6 +29,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 import threading
 
@@ -40,7 +41,10 @@ urllib3.disable_warnings(InsecureRequestWarning)
 from broker import BROKERS, make_streamer
 from instruments import InstrumentRegistry
 from redis_manager import RedisManager
-from settings import config
+from settings import config, setup_logging
+
+setup_logging()
+logger = logging.getLogger("stream")
 
 
 def _batch_size_for(broker: str) -> int:
@@ -107,10 +111,9 @@ def main() -> None:
             ]
         except LookupError as exc:
             sys.exit(f"ERROR: {exc}")
-        print(
-            f"[mock] {args.broker}: replaying {args.file} as {args.isin[0]} "
-            f"@ speed={args.speed}×",
-            file=sys.stderr,
+        logger.info(
+            "mock %s: replaying %s as %s @ speed=%s×",
+            args.broker, args.file, args.isin[0], args.speed,
         )
     else:
         isins = args.isin if args.isin else [i.isin for i in InstrumentRegistry()]
@@ -125,13 +128,12 @@ def main() -> None:
             make_streamer(broker=args.broker, isins=batch, redis_manager=rm)
             for batch in batches
         ]
-        print(
-            f"[live] {args.broker}: {len(isins)} isin(s) over {len(batches)} "
-            f"connection(s) (batch_size={batch_size}):",
-            file=sys.stderr,
+        logger.info(
+            "live %s: %d isin(s) over %d connection(s) (batch_size=%d)",
+            args.broker, len(isins), len(batches), batch_size,
         )
         for i, batch in enumerate(batches):
-            print(f"  conn[{i}]: {batch}", file=sys.stderr)
+            logger.info("  conn[%d]: %s", i, batch)
 
     threads = [
         threading.Thread(
@@ -147,7 +149,7 @@ def main() -> None:
         for t in threads:
             t.join()
     except KeyboardInterrupt:
-        print("\n[main] interrupted, stopping all streamers", file=sys.stderr)
+        logger.info("interrupted, stopping all streamers")
         for s in streamers:
             s.stop()
         for t in threads:

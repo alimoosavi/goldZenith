@@ -23,6 +23,7 @@ so the feed is broker-agnostic at the call site:
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from dataclasses import dataclass
 from typing import Callable
@@ -31,6 +32,8 @@ from broker.registry import BROKERS, BrokerEntry
 from historical import OrderbookSnapshot
 from redis_manager import RedisManager
 from settings import config
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,8 +116,8 @@ class OrderbookFeed:
                         payload = json.loads(fields["data"])
                         isin, snapshot = from_bl(payload, fields.get("ts", ""))
                     except Exception as exc:
-                        print(
-                            f"[OrderbookFeed] decode error on {stream_key}/{stream_id}: {exc}"
+                        logger.warning(
+                            "decode error on %s/%s: %s", stream_key, stream_id, exc,
                         )
                         continue
                     update = BookUpdate(
@@ -124,9 +127,7 @@ class OrderbookFeed:
                     try:
                         self.on_update(update)
                     except Exception as exc:
-                        print(
-                            f"[OrderbookFeed] on_update error: {exc}"
-                        )
+                        logger.warning("on_update error: %s", exc)
 
     def stop(self) -> None:
         self._stop.set()

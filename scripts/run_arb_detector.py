@@ -12,6 +12,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import logging
 import signal
 import sys
 
@@ -19,7 +20,10 @@ from broker import BROKERS
 from consumers import ArbitrageDetector
 from instruments import InstrumentRegistry
 from redis_manager import RedisManager
-from settings import config
+from settings import config, setup_logging
+
+setup_logging()
+logger = logging.getLogger("arb")
 
 
 def main() -> None:
@@ -53,9 +57,8 @@ def main() -> None:
     detector = ArbitrageDetector(broker=args.broker, isins=isins, redis_manager=rm)
     signal.signal(signal.SIGINT, lambda *_: detector.stop())
 
-    print(
-        f"[arb] broker={args.broker} isins={isins} watching for signals…",
-        file=sys.stderr,
+    logger.info(
+        "broker=%s isins=%s watching for signals…", args.broker, isins,
     )
     detector.run()
 

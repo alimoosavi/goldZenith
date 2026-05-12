@@ -20,12 +20,15 @@ Latency-first design:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Callable
 
 from feed import BookUpdate, OrderbookFeed
 from historical import OrderbookSnapshot
 from redis_manager import RedisManager
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,14 +113,14 @@ class ArbitrageDetector:
         try:
             signals = self.strategy(update, self.books)
         except Exception as exc:
-            print(f"[ArbitrageDetector] strategy error on {update.isin}: {exc}")
+            logger.warning("strategy error on %s: %s", update.isin, exc)
             return
         for sig in signals:
             try:
                 self.on_signal(sig)
             except Exception as exc:
-                print(f"[ArbitrageDetector] on_signal error: {exc}")
+                logger.warning("on_signal error: %s", exc)
 
 
 def _default_on_signal(sig: ArbSignal) -> None:
-    print(f"[arb] {sig.ts} {sig.isin} {sig.kind} {sig.details}")
+    logger.info("%s %s %s %s", sig.ts, sig.isin, sig.kind, sig.details)

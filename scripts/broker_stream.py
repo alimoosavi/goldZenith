@@ -17,12 +17,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 import threading
 
 from broker.pasargad import MockPasargadStreamer, PasargadStreamer
 from redis_manager import RedisManager
-from settings import config
+from settings import config, setup_logging
+
+setup_logging()
+logger = logging.getLogger("stream-legacy")
 
 ISINS: list[str] = ["IRTKMOFD0001", "IRTKROBA0001", "IRTKZARA0001", "IRO1LTOS0001"]
 
@@ -53,10 +57,13 @@ def main() -> None:
             MockPasargadStreamer(isin=isin, redis_manager=rm, tick_interval=args.tick_interval)
             for isin in ISINS
         ]
-        print(f"[mock] spawning {len(streamers)} mock streamers @ {args.tick_interval}s ticks")
+        logger.info(
+            "mock: spawning %d mock streamers @ %ss ticks",
+            len(streamers), args.tick_interval,
+        )
     else:
         streamers = [PasargadStreamer(isin=isin, redis_manager=rm) for isin in ISINS]
-        print(f"[live] spawning {len(streamers)} Pasargad streamers")
+        logger.info("live: spawning %d Pasargad streamers", len(streamers))
 
     threads = [
         threading.Thread(target=s.run, name=f"pasargad-{s.isin}", daemon=False)
@@ -68,7 +75,7 @@ def main() -> None:
         for t in threads:
             t.join()
     except KeyboardInterrupt:
-        print("\n[main] interrupted, stopping all streamers", file=sys.stderr)
+        logger.info("interrupted, stopping all streamers")
         for s in streamers:
             s.stop()
         for t in threads:

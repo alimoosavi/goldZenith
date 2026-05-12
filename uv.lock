@@ -784,6 +784,7 @@ name = "goldzenith"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "fastapi" },
     { name = "finpy-tse" },
     { name = "ipykernel" },
@@ -803,6 +804,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.13.5" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "finpy-tse", specifier = ">=1.2.10" },
     { name = "ipykernel", specifier = ">=7.2.0" },

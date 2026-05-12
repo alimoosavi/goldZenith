@@ -25,6 +25,7 @@ feed uses; adding a new broker requires no changes here.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 import threading
 from pathlib import Path
@@ -33,7 +34,10 @@ from broker.registry import BROKERS, get_broker
 from feed import BookUpdate, OrderbookFeed
 from instruments import InstrumentRegistry
 from redis_manager import RedisManager
-from settings import config
+from settings import config, setup_logging
+
+setup_logging()
+logger = logging.getLogger("feed")
 
 
 def _parse_mock_files(specs: list[str]) -> list[tuple[str, Path]]:
@@ -112,10 +116,9 @@ def main() -> None:
             )
             t.start()
             threads.append(t)
-        print(
-            f"[mock] {args.broker}: spawned {len(streamers)} producer thread(s) "
-            f"@ speed={args.speed}×",
-            file=sys.stderr,
+        logger.info(
+            "mock %s: spawned %d producer thread(s) @ speed=%s×",
+            args.broker, len(streamers), args.speed,
         )
     else:
         if args.isins.strip():
@@ -124,10 +127,9 @@ def main() -> None:
             isins = [inst.isin for inst in InstrumentRegistry()]
         if not isins:
             sys.exit("real-mode: --isins is empty and the registry has no entries")
-        print(
-            f"[live] {args.broker}: subscribing to {len(isins)} stream(s): "
-            f"{', '.join(isins)}",
-            file=sys.stderr,
+        logger.info(
+            "live %s: subscribing to %d stream(s): %s",
+            args.broker, len(isins), ", ".join(isins),
         )
 
     feed = OrderbookFeed(
@@ -138,7 +140,7 @@ def main() -> None:
     try:
         feed.run()
     except KeyboardInterrupt:
-        print("\n[main] interrupted, stopping", file=sys.stderr)
+        logger.info("interrupted, stopping")
     finally:
         feed.stop()
         for s in streamers:

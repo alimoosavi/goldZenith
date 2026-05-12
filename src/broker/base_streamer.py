@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import abc
 import json
-import sys
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -47,6 +47,9 @@ class BaseStreamer(abc.ABC):
         self.isins: list[str] = list(isins)
         self.redis = redis_manager
         self.stream_maxlen = stream_maxlen
+        # Logger named after the concrete subclass's module (e.g.
+        # `broker.nibi.streamer`) so callers can filter by broker.
+        self._logger = logging.getLogger(type(self).__module__)
 
     @classmethod
     @abc.abstractmethod
@@ -92,8 +95,7 @@ class BaseStreamer(abc.ABC):
         return f"{self.isins[0]}+{len(self.isins) - 1}"
 
     def _log(self, tag: str, message: str) -> None:
-        print(
-            f"[{type(self).__name__} {self._log_prefix}] {tag}: {message}",
-            file=sys.stderr,
-            flush=True,
-        )
+        self._logger.info("[%s] %s: %s", self._log_prefix, tag, message)
+
+    def _warn(self, tag: str, message: str) -> None:
+        self._logger.warning("[%s] %s: %s", self._log_prefix, tag, message)
