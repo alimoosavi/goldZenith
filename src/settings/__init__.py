@@ -80,6 +80,15 @@ class Config(BaseSettings):
 
     instruments_file: Path = Path("data/instruments.yaml")
 
+    # Trading-session window used by the mock streamer to filter the
+    # head/tail noise that TSETMC's CDN ships in its parquets (data
+    # often starts ~06:00:00 well before any real activity). Snapshots
+    # outside `[market_open, market_end]` are dropped before replay.
+    # Inclusive on both ends. Strings, compared lexicographically — keep
+    # the zero-padded `HH:MM:SS` format.
+    market_open: str = "12:00:00"
+    market_end: str = "18:00:00"
+
     @field_validator("tsetmc_cdn_base_url", "pasargad_api_base_url", "nibi_subscribe_url")
     @classmethod
     def _strip_trailing_slash(cls, v: str) -> str:

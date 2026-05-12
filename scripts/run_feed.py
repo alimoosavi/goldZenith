@@ -1,21 +1,23 @@
-"""Subscribe to `{isin}:orderbook` Redis streams and pretty-print updates.
+"""Subscribe to `{broker}:{isin}:orderbook` Redis streams and pretty-print updates.
 
 Two modes:
 
   - **real** (default): one `OrderbookFeed` consumer-only loop. Assumes a
-    producer (e.g. live `PasargadStreamer` via `task stream`, or a
-    separate `task stream -- --mock ...`) is already publishing.
+    producer (e.g. live streamer via `task stream`, or a separate
+    `task stream -- --broker <b> --mock --date <jalali>`) is already
+    publishing.
 
-        task feed -- --broker pasargad --isins IRTKLOTF0001,IRTKMOFD0001
+        task feed -- --broker nibi --isins IRTKLOTF0001,IRTKMOFD0001
 
-  - **mock** (`--mock`): spawns the broker's mock-streamer as a
-    background thread per (isin, parquet) pair, then runs the same
+  - **mock** (`--mock --date <YYYY-MM-DD>`): spawns one mock-streamer
+    background thread per ISIN, each replaying
+    `{config.orderbooks_dir}/{isin}_{date}.parquet`, then runs the
     consumer loop in the main thread — one command, end-to-end demo.
+    ISINs default to every entry in `config.instruments_file`; pass
+    `--isins` to override. Parquets missing for the chosen date are
+    skipped with a warning.
 
-        task feed -- --broker pasargad --mock \\
-            --mock-file IRTKLOTF0001=data/orderbooks/IRTKLOTF0001_1403-12-01.parquet \\
-            --mock-file IRTKMOFD0001=data/orderbooks/IRTKMOFD0001_1403-12-02.parquet \\
-            --speed 5
+        task feed -- --broker nibi --mock --date 1403-12-01 --speed 5
 
 Brokers are looked up from `broker.registry.BROKERS`, so `--broker
 <name>` selects which streamer / mock-streamer / `from_bl` adapter the
@@ -28,7 +30,6 @@ import argparse
 import logging
 import sys
 import threading
-from pathlib import Path
 
 from broker.registry import BROKERS, get_broker
 from feed import BookUpdate, OrderbookFeed
@@ -38,19 +39,6 @@ from settings import config, setup_logging
 
 setup_logging()
 logger = logging.getLogger("feed")
-
-
-def _parse_mock_files(specs: list[str]) -> list[tuple[str, Path]]:
-    pairs: list[tuple[str, Path]] = []
-    for spec in specs:
-        isin, sep, path = spec.partition("=")
-        if not sep or not isin or not path:
-            sys.exit(f"--mock-file must be ISIN=PATH, got: {spec!r}")
-        p = Path(path)
-        if not p.is_file():
-            sys.exit(f"--mock-file {isin}: file not found: {p}")
-        pairs.append((isin, p))
-    return pairs
 
 
 def _format_update(u: BookUpdate) -> str:
@@ -69,17 +57,18 @@ def main() -> None:
     )
     ap.add_argument(
         "--isins", default="",
-        help="Real-mode: comma-separated ISINs to subscribe to. "
+        help="Comma-separated ISINs (real or mock mode). "
              "If omitted, subscribes to every isin in the registry.",
     )
     ap.add_argument(
         "--mock", action="store_true",
         help="Spawn the broker's mock-streamer producers in this process "
-             "(requires --mock-file pairs)",
+             "(requires --date)",
     )
     ap.add_argument(
-        "--mock-file", action="append", default=[], metavar="ISIN=PATH",
-        help="Mock-only: one (ISIN, parquet) pair; repeat for multiple instruments",
+        "--date", type=str,
+        help="Mock-only: Jalali date (YYYY-MM-DD) to replay; each ISIN's "
+             "parquet is resolved as {config.orderbooks_dir}/{isin}_{date}.parquet",
     )
     ap.add_argument(
         "--speed", type=float, default=1.0,
@@ -98,35 +87,50 @@ def main() -> None:
 
     broker = get_broker(args.broker)
 
+    if args.isins.strip():
+        isins = [i.strip() for i in args.isins.split(",") if i.strip()]
+    else:
+        isins = [inst.isin for inst in InstrumentRegistry()]
+    if not isins:
+        sys.exit(
+            f"ERROR: no ISINs — pass --isins or populate {config.instruments_file}"
+        )
+
     streamers = []
     threads: list[threading.Thread] = []
     if args.mock:
-        pairs = _parse_mock_files(args.mock_file)
-        if not pairs:
-            sys.exit("--mock requires at least one --mock-file ISIN=PATH")
-        isins = [isin for isin, _ in pairs]
-        for isin, path in pairs:
-            s = broker.mock_streamer_cls(
-                isins=[isin], redis_manager=rm,
-                parquet_path=path, speed=args.speed,
-            )
+        if not args.date:
+            sys.exit("--mock requires --date YYYY-MM-DD")
+        if broker.mock_streamer_cls is None:
+            sys.exit(f"--mock: broker {args.broker!r} has no mock-streamer registered")
+        spawned_isins: list[str] = []
+        for isin in isins:
+            try:
+                s = broker.mock_streamer_cls(
+                    isins=[isin], redis_manager=rm,
+                    jalali_date=args.date, speed=args.speed,
+                )
+            except FileNotFoundError as exc:
+                logger.warning("skipping %s: %s", isin, exc)
+                continue
             streamers.append(s)
             t = threading.Thread(
                 target=s.run, name=f"{args.broker}-mock-{isin}", daemon=True,
             )
             t.start()
             threads.append(t)
+            spawned_isins.append(isin)
+        if not streamers:
+            sys.exit(
+                f"ERROR: no parquet files found under {config.orderbooks_dir} "
+                f"for date {args.date}"
+            )
+        isins = spawned_isins  # subscribe only to streams that actually have a producer
         logger.info(
-            "mock %s: spawned %d producer thread(s) @ speed=%s×",
-            args.broker, len(streamers), args.speed,
+            "mock %s: spawned %d producer thread(s) for date %s @ speed=%s×",
+            args.broker, len(streamers), args.date, args.speed,
         )
     else:
-        if args.isins.strip():
-            isins = [i.strip() for i in args.isins.split(",") if i.strip()]
-        else:
-            isins = [inst.isin for inst in InstrumentRegistry()]
-        if not isins:
-            sys.exit("real-mode: --isins is empty and the registry has no entries")
         logger.info(
             "live %s: subscribing to %d stream(s): %s",
             args.broker, len(isins), ", ".join(isins),

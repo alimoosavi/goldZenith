@@ -9,6 +9,10 @@ The mock replays one parquet file → one ISIN, so it accepts the same
 list-shaped `isins` argument as the live streamer but requires exactly
 one entry. Multi-ISIN multiplexing only makes sense for live hubs.
 
+The parquet path is derived from `config.orderbooks_dir` and the project
+naming convention `{isin}_{jalali_date}.parquet` — callers pass a Jalali
+date and the mock resolves the path itself.
+
 `ts` is current wall-clock (not the historical session time) so
 downstream stale-quote detectors don't fire on replayed data.
 
@@ -19,10 +23,10 @@ of session time.
 from __future__ import annotations
 
 import threading
-from pathlib import Path
 
 from historical import StorageClient
 from redis_manager import RedisManager
+from settings import config
 
 from .adapter import to_bl
 from ..base_streamer import BaseStreamer
@@ -37,7 +41,7 @@ class MockPasargadStreamer(BaseStreamer):
         *,
         isins: list[str],
         redis_manager: RedisManager,
-        parquet_path: Path | str,
+        jalali_date: str,
         speed: float = 1.0,
         stream_maxlen: int | None = 10_000,
     ) -> None:
@@ -46,9 +50,12 @@ class MockPasargadStreamer(BaseStreamer):
             raise ValueError(
                 f"MockPasargadStreamer: replay is single-instrument; got {len(self.isins)} isins"
             )
+        if not jalali_date:
+            raise ValueError("MockPasargadStreamer: jalali_date must be non-empty")
         if speed <= 0:
             raise ValueError("MockPasargadStreamer: speed must be > 0")
-        self.parquet_path = Path(parquet_path)
+        self.jalali_date = jalali_date
+        self.parquet_path = config.orderbooks_dir / f"{self.isins[0]}_{jalali_date}.parquet"
         if not self.parquet_path.is_file():
             raise FileNotFoundError(
                 f"MockPasargadStreamer: parquet file not found: {self.parquet_path}"
@@ -70,11 +77,24 @@ class MockPasargadStreamer(BaseStreamer):
             self._log("mock", f"{self.parquet_path.name} has no rows, nothing to replay")
             return
 
+        # Drop CDN head/tail noise outside the trading-session window.
+        raw_count = len(snapshots)
+        open_t, end_t = config.market_open, config.market_end
+        snapshots = [s for s in snapshots if open_t <= s.time <= end_t]
+        if not snapshots:
+            self._log(
+                "mock",
+                f"{self.parquet_path.name}: all {raw_count} rows outside "
+                f"[{open_t}, {end_t}], nothing to replay",
+            )
+            return
+
         delay = 1.0 / self.speed
         self._log(
             "mock",
-            f"replaying {len(snapshots)} rows from {self.parquet_path.name} "
-            f"@ speed={self.speed}× → {self.orderbook_stream_key(self.isin)}",
+            f"replaying {len(snapshots)}/{raw_count} rows from {self.parquet_path.name} "
+            f"(window [{open_t}, {end_t}]) @ speed={self.speed}× → "
+            f"{self.orderbook_stream_key(self.isin)}",
         )
 
         self._stop.clear()

@@ -42,12 +42,12 @@ tasks:
       - uv run python scripts/mid_prices.py all {{.CLI_ARGS}}
 
   stream:
-    desc: Run a broker streamer for every ISIN in INSTRUMENTS_FILE — pass --broker [--isin OVERRIDE ... | --mock --file --speed] via -- CLI_ARGS
+    desc: Run a broker streamer for every ISIN in INSTRUMENTS_FILE — pass --broker [--isin OVERRIDE ... | --mock --date YYYY-MM-DD [--speed N]] via -- CLI_ARGS
     cmds:
       - uv run python scripts/broker_signalr_stream.py {{.CLI_ARGS}}
 
   feed:
-    desc: Subscribe to {isin}:orderbook streams — pass --broker [--isins ... | --mock --mock-file ISIN=PATH ... --speed N] via -- CLI_ARGS
+    desc: Subscribe to {broker}:{isin}:orderbook streams — pass --broker [--isins ... | --mock --date YYYY-MM-DD [--speed N]] via -- CLI_ARGS
     cmds:
       - uv run python scripts/run_feed.py {{.CLI_ARGS}}
 

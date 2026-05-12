@@ -11,19 +11,23 @@ Two modes:
     streamer thread per chunk. Each streamer holds a single SignalR
     connection and multiplexes all its ISINs over it. BL events fan
     back out per-ISIN onto `{broker}:{isin}:orderbook`.
-  - **mock** (`--mock --file <parquet> --isin <ISIN>`): one mock
-    streamer that replays a stored historical orderbook Parquet onto
-    `{broker}:{isin}:orderbook`. Only works for brokers that have
-    registered a `mock_streamer_cls`.
+  - **mock** (`--mock --date <YYYY-MM-DD>`): spawns one mock-streamer
+    thread per ISIN, each replaying
+    `{config.orderbooks_dir}/{isin}_{date}.parquet` onto
+    `{broker}:{isin}:orderbook`. ISINs default to every entry in the
+    registry (`config.instruments_file`); pass `--isin` one or more
+    times to replay only a subset. Parquets that don't exist for the
+    chosen date are skipped with a warning.
 
 Examples:
     docker compose up -d redis
     uv run python scripts/broker_signalr_stream.py --broker nibi
     uv run python scripts/broker_signalr_stream.py --broker nibi \\
         --isin IRTKMOFD0001 --isin IRTKROBA0001
-    uv run python scripts/broker_signalr_stream.py --broker pasargad --mock \\
-        --file data/orderbooks/IRTKMOFD0001_1403-12-01.parquet \\
-        --isin IRTKMOFD0001 --speed 2.0
+    uv run python scripts/broker_signalr_stream.py --broker nibi --mock \\
+        --date 1403-12-01 --speed 5.0
+    uv run python scripts/broker_signalr_stream.py --broker nibi --mock \\
+        --date 1403-12-01 --isin IRTKMOFD0001 --speed 5.0
 """
 
 from __future__ import annotations
@@ -72,17 +76,17 @@ def main() -> None:
     )
     ap.add_argument(
         "--mock", action="store_true",
-        help="Replay a stored Parquet via the broker's mock-streamer instead of hitting the live hub",
+        help="Replay stored Parquets via the broker's mock-streamer instead of hitting the live hub",
     )
     ap.add_argument(
-        "--file", type=str,
-        help="Mock-only: path to the orderbook Parquet to replay",
+        "--date", type=str,
+        help="Mock-only: Jalali date (YYYY-MM-DD) to replay; each ISIN's parquet "
+             "is resolved as {config.orderbooks_dir}/{isin}_{date}.parquet",
     )
     ap.add_argument(
         "--isin", action="append", default=None,
-        help="ISIN to subscribe to (live) or embed in the payload (mock). "
-             "Repeatable in live mode; required (single value) in mock mode. "
-             "Defaults to every ISIN in config.instruments_file when omitted in live mode.",
+        help="ISIN to subscribe to. Repeatable. Defaults to every ISIN in "
+             "config.instruments_file in both live and mock modes.",
     )
     ap.add_argument(
         "--speed", type=float, default=1.0,
@@ -100,20 +104,35 @@ def main() -> None:
         )
 
     if args.mock:
-        if not args.file or not args.isin or len(args.isin) != 1:
-            sys.exit("--mock requires --file and exactly one --isin")
-        try:
-            streamers = [
-                make_streamer(
-                    broker=args.broker, isins=[args.isin[0]], redis_manager=rm,
-                    mock=True, parquet_path=args.file, speed=args.speed,
+        if not args.date:
+            sys.exit("--mock requires --date YYYY-MM-DD")
+        isins = args.isin if args.isin else [i.isin for i in InstrumentRegistry()]
+        if not isins:
+            sys.exit(
+                f"ERROR: no ISINs to replay — pass --isin or populate "
+                f"{config.instruments_file}"
+            )
+        streamers = []
+        for isin in isins:
+            try:
+                s = make_streamer(
+                    broker=args.broker, isins=[isin], redis_manager=rm,
+                    mock=True, jalali_date=args.date, speed=args.speed,
                 )
-            ]
-        except LookupError as exc:
-            sys.exit(f"ERROR: {exc}")
+            except FileNotFoundError as exc:
+                logger.warning("skipping %s: %s", isin, exc)
+                continue
+            except LookupError as exc:
+                sys.exit(f"ERROR: {exc}")
+            streamers.append(s)
+        if not streamers:
+            sys.exit(
+                f"ERROR: no parquet files found under {config.orderbooks_dir} "
+                f"for date {args.date}"
+            )
         logger.info(
-            "mock %s: replaying %s as %s @ speed=%s×",
-            args.broker, args.file, args.isin[0], args.speed,
+            "mock %s: replaying %d isin(s) for date %s @ speed=%s× from %s",
+            args.broker, len(streamers), args.date, args.speed, config.orderbooks_dir,
         )
     else:
         isins = args.isin if args.isin else [i.isin for i in InstrumentRegistry()]
