@@ -10,11 +10,12 @@ NIBI_RED_ENDPOINT_BASE_URL in `.env`).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from dataclasses import asdict
 
-import requests
+import aiohttp
 
 from broker.nibi import NibiBrokerClient, OrderSide
 from settings import config
@@ -30,32 +31,32 @@ DISCLOSED_QUANTITY = 0
 EXECUTION_TYPE     = "Instant"
 
 
-def main() -> None:
-    client = NibiBrokerClient(
+async def main() -> None:
+    async with NibiBrokerClient(
         auth_token=config.nibi_auth_token,
         cookie=config.nibi_cookie,
         red_endpoint_base_url=config.nibi_red_endpoint_base_url,
-    )
-    try:
-        resp = client.create_order(
-            instrument_id=INSTRUMENT_ID,
-            side=SIDE,
-            price=PRICE,
-            quantity=QUANTITY,
-            validity=VALIDITY,
-            validity_date=VALIDITY_DATE,
-            disclosed_quantity=DISCLOSED_QUANTITY,
-            execution_type=EXECUTION_TYPE,
-        )
-    except requests.HTTPError as e:
-        print(f"❌ HTTP Error: {e.response.status_code} - {e.response.text}")
-        sys.exit(1)
-    except requests.ConnectionError:
-        print("❌ Connection Error: Could not reach the endpoint.")
-        sys.exit(1)
-    except requests.RequestException as e:
-        print(f"❌ Request failed: {e}")
-        sys.exit(1)
+    ) as client:
+        try:
+            resp = await client.create_order(
+                instrument_id=INSTRUMENT_ID,
+                side=SIDE,
+                price=PRICE,
+                quantity=QUANTITY,
+                validity=VALIDITY,
+                validity_date=VALIDITY_DATE,
+                disclosed_quantity=DISCLOSED_QUANTITY,
+                execution_type=EXECUTION_TYPE,
+            )
+        except aiohttp.ClientResponseError as e:
+            print(f"❌ HTTP Error: {e.status} - {e.message}")
+            sys.exit(1)
+        except aiohttp.ClientConnectionError:
+            print("❌ Connection Error: Could not reach the endpoint.")
+            sys.exit(1)
+        except aiohttp.ClientError as e:
+            print(f"❌ Request failed: {e}")
+            sys.exit(1)
 
     print("✅ Success!" if resp.successful else "❌ Failed!")
     print(json.dumps(asdict(resp), indent=2, ensure_ascii=False))
@@ -73,4 +74,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

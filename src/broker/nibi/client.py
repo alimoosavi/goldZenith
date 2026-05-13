@@ -1,44 +1,57 @@
-"""Sync HTTPS client for Nibi's order-management REST API (`red.nibi.ir`).
+"""Async HTTPS client for Nibi's order-management REST API (`red.nibi.ir`).
 
 Wraps the three OMS endpoints — `OrderEntry`, `OrderCancellation`,
-`GetOrders` — behind a single class so callers don't repeat the
-`Authorization` / `Cookie` / `Content-Type` headers and base-URL
-plumbing per call.
+`GetOrders` — behind a single async class. Backed by aiohttp so it
+shares an event loop cleanly with `NibiStreamer` (also asyncio) and
+can be `await`ed directly from the arb engine's async control flow,
+including concurrent fan-out (e.g. cancel N stale orders in parallel
+with `asyncio.gather`).
 
-Wire schema (`OrderSide`, `Order`, `OrderError`, `CreateOrderResponse`,
-`CancelOrderResponse`, `GetOrdersResponse`) lives in `schema.py` so
-callers can import the typed payloads without pulling in `requests` or
-constructing a live session.
+Wire schema (`OrderSide`, `Order`, `OrderError`, ...Response) lives in
+`schema.py` so callers can import the typed payloads without pulling
+in aiohttp or constructing a live session.
 
 Usage:
 
+    import asyncio
     from broker.nibi import NibiBrokerClient, OrderSide
     from settings import config
 
-    client = NibiBrokerClient(
-        auth_token=config.nibi_auth_token,
-        cookie=config.nibi_cookie,
-        red_endpoint_base_url=config.nibi_red_endpoint_base_url,
-    )
-    res = client.create_order(
-        instrument_id="IRTKMOFD0001",
-        side=OrderSide.BUY,
-        price=561_000,
-        quantity=2,
-    )
-    if res.successful and res.data is not None:
-        client.cancel_order(order_id=res.data.order_id)
-    client.get_orders()                # today
-    client.get_orders("20250226")      # explicit date
+    async def main() -> None:
+        async with NibiBrokerClient(
+            auth_token=config.nibi_auth_token,
+            cookie=config.nibi_cookie,
+            red_endpoint_base_url=config.nibi_red_endpoint_base_url,
+        ) as client:
+            res = await client.create_order(
+                instrument_id="IRTKMOFD0001",
+                side=OrderSide.BUY,
+                price=561_000,
+                quantity=2,
+            )
+            if res.successful and res.data is not None:
+                await client.cancel_order(order_id=res.data.order_id)
+            await client.get_orders()
 
-HTTP-level failures raise `requests.HTTPError`.
+    asyncio.run(main())
+
+The underlying `aiohttp.ClientSession` is created lazily on the first
+call and torn down via the async context manager (preferred) or an
+explicit `await client.close()`.
+
+On HTTP-level failure the client reads the response body BEFORE
+raising, so `aiohttp.ClientResponseError.message` carries whatever
+diagnostic the broker actually wrote (truncated to 500 chars) instead
+of an empty string — important for the gateway's non-standard `6xx`
+status codes where the reason phrase is often blank.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from types import TracebackType
 
-import requests
+import aiohttp
 
 from .schema import (
     CancelOrderResponse,
@@ -49,7 +62,7 @@ from .schema import (
 
 
 class NibiBrokerClient:
-    """Order-management client for the Nibi broker (`red.nibi.ir`).
+    """Async order-management client for the Nibi broker (`red.nibi.ir`).
 
     `auth_token` and `cookie` are session-bound — when they expire the
     client must be reconstructed with fresh credentials (the streamer's
@@ -60,6 +73,11 @@ class NibiBrokerClient:
     `config.nibi_red_endpoint_base_url`) — the client itself stays
     decoupled from the settings module so it can be used in tests or
     against staging without touching env vars.
+
+    Prefer the async-context-manager form so the session is closed even
+    on exception; the manual `await client.close()` path is provided
+    for cases where the client outlives a single `async with` block
+    (long-running arb engine, etc.).
     """
 
     def __init__(
@@ -78,18 +96,89 @@ class NibiBrokerClient:
         if not red_endpoint_base_url:
             raise ValueError("NibiBrokerClient: red_endpoint_base_url is empty")
         self.red_endpoint_base_url = red_endpoint_base_url.rstrip("/")
-        self.timeout = timeout
+        self.timeout = aiohttp.ClientTimeout(total=timeout)
         self.verify_ssl = verify_ssl
         self._headers = {
             "Authorization": auth_token,
             "Cookie": cookie,
             "Content-Type": "application/json",
         }
-        self._session = requests.Session()
+        self._session: aiohttp.ClientSession | None = None
+
+    # ── lifecycle ────────────────────────────────────────────────────────
+
+    async def __aenter__(self) -> NibiBrokerClient:
+        await self._ensure_session()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        await self.close()
+
+    async def close(self) -> None:
+        """Close the underlying aiohttp session. Idempotent — safe to
+        call repeatedly and safe to call before any request has been
+        issued (no-op in that case)."""
+        if self._session is not None and not self._session.closed:
+            await self._session.close()
+        self._session = None
+
+    async def _ensure_session(self) -> aiohttp.ClientSession:
+        """Lazily create the aiohttp session on first use. The session
+        carries the shared `Authorization` / `Cookie` / `Content-Type`
+        headers and the configured timeout / SSL policy so each request
+        method stays a clean one-liner."""
+        if self._session is None or self._session.closed:
+            # `ssl=False` disables verification entirely; `ssl=None`
+            # falls back to aiohttp's default (verify with system CAs).
+            connector = aiohttp.TCPConnector(
+                ssl=None if self.verify_ssl else False,
+            )
+            self._session = aiohttp.ClientSession(
+                headers=self._headers,
+                timeout=self.timeout,
+                connector=connector,
+            )
+        return self._session
+
+    @staticmethod
+    async def _read_envelope(r: aiohttp.ClientResponse) -> dict:
+        """Read the response body as the broker's standard envelope.
+
+        The Nibi gateway uses non-standard HTTP `6xx` codes to signal
+        domain-level rejections (e.g. `OperationNotAllowed`), but the
+        body is still the normal `{response: {successful, data,
+        errors}}` shape — same as a HTTP 200 failure. We pass `6xx`
+        through as a soft error so callers branch on the typed
+        response's `.successful` field. Matches the historical
+        `requests` sync-client behaviour, where `raise_for_status()`
+        only checks `400 <= status < 600` and silently treats `600+`
+        as success.
+
+        Only raise on `4xx`/`5xx` — those indicate real transport /
+        auth / gateway failure where the body usually isn't the
+        broker envelope. The body (truncated to 500 chars) is folded
+        into `ClientResponseError.message` so the script's error
+        handler shows something useful instead of an empty string.
+        """
+        if 400 <= r.status < 600:
+            body = await r.text()
+            raise aiohttp.ClientResponseError(
+                r.request_info,
+                r.history,
+                status=r.status,
+                message=(body[:500] or r.reason or ""),
+                headers=r.headers,
+            )
+        return await r.json()
 
     # ── endpoints ────────────────────────────────────────────────────────
 
-    def create_order(
+    async def create_order(
         self,
         *,
         instrument_id: str,
@@ -122,17 +211,15 @@ class NibiBrokerClient:
             "QTitDvlOM": disclosed_quantity,
             "ExecutionType": execution_type,
         }
-        r = self._session.post(
+        session = await self._ensure_session()
+        async with session.post(
             f"{self.red_endpoint_base_url}/api/Orders/OrderEntry",
-            headers=self._headers,
             json=payload,
-            timeout=self.timeout,
-            verify=self.verify_ssl,
-        )
-        r.raise_for_status()
-        return CreateOrderResponse.from_response(r.json())
+        ) as r:
+            data = await self._read_envelope(r)
+            return CreateOrderResponse.from_response(data)
 
-    def cancel_order(self, order_id: int) -> CancelOrderResponse:
+    async def cancel_order(self, order_id: int) -> CancelOrderResponse:
         """POST `/api/Orders/OrderCancellation?orderId=<id>` (no body).
 
         Returns a `CancelOrderResponse` — check `.successful`, then read
@@ -140,17 +227,18 @@ class NibiBrokerClient:
         `order_status` updated to reflect the cancellation result) or
         `.errors`.
         """
-        r = self._session.post(
+        session = await self._ensure_session()
+        async with session.post(
             f"{self.red_endpoint_base_url}/api/Orders/OrderCancellation",
-            headers=self._headers,
             params={"orderId": order_id},
-            timeout=self.timeout,
-            verify=self.verify_ssl,
-        )
-        r.raise_for_status()
-        return CancelOrderResponse.from_response(r.json())
+        ) as r:
+            data = await self._read_envelope(r)
+            return CancelOrderResponse.from_response(data)
 
-    def get_orders(self, history_date: str | None = None) -> GetOrdersResponse:
+    async def get_orders(
+        self,
+        history_date: str | None = None,
+    ) -> GetOrdersResponse:
         """GET `/api/Orders/GetOrders?historyDate=YYYYMMDD`.
 
         Returns a `GetOrdersResponse` — check `.successful`, then read
@@ -160,12 +248,10 @@ class NibiBrokerClient:
         """
         if history_date is None:
             history_date = datetime.now().strftime("%Y%m%d")
-        r = self._session.get(
+        session = await self._ensure_session()
+        async with session.get(
             f"{self.red_endpoint_base_url}/api/Orders/GetOrders",
-            headers=self._headers,
             params={"historyDate": history_date},
-            timeout=self.timeout,
-            verify=self.verify_ssl,
-        )
-        r.raise_for_status()
-        return GetOrdersResponse.from_response(r.json())
+        ) as r:
+            data = await self._read_envelope(r)
+            return GetOrdersResponse.from_response(data)
