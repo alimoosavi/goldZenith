@@ -21,14 +21,20 @@ The on-disk format is a top-level YAML list, one entry per instrument:
       ins_code: "34144395039913458"
       symbol: TKMOFD
       name: Mofid Treasury Fund
+      stale_threshold_seconds: 2.26
     - isin: IRTKROBA0001
       ins_code: ""
       symbol: ""
       name: ""
+      stale_threshold_seconds: 4.93
 
 Empty strings are placeholders — entries can be added incrementally as
 the mappings are discovered (e.g. by a backfill script that hits
-TSETMC's search endpoint).
+TSETMC's search endpoint). `stale_threshold_seconds` is the p99
+inter-tick gap measured from historical data; consumers use it to
+decide when a cached best-quote is too old to act on (typically the
+arb engine, before placing an order). Defaults to `+inf` for entries
+that omit it (never considered stale — conservative).
 """
 
 from __future__ import annotations
@@ -51,12 +57,19 @@ class Instrument:
     Parquet filename component, etc. `ins_code` is only needed when
     talking to TSETMC's CDN and may be the empty string for entries
     whose mapping has not been backfilled yet.
+
+    `stale_threshold_seconds` is the p99 inter-tick gap from historical
+    data — i.e. the maximum age (in seconds) before a cached quote for
+    this instrument should be considered stale. Defaults to `+inf`
+    (never stale) so old call sites that construct `Instrument`
+    without it keep working; live YAML entries populate it explicitly.
     """
 
     isin: str
     ins_code: str = ""
     symbol: str = ""
     name: str = ""
+    stale_threshold_seconds: float = float("inf")
 
 
 class InstrumentRegistry:
@@ -98,6 +111,9 @@ class InstrumentRegistry:
                 ins_code=str(entry.get("ins_code", "")).strip(),
                 symbol=str(entry.get("symbol", "")).strip(),
                 name=str(entry.get("name", "")).strip(),
+                stale_threshold_seconds=float(
+                    entry.get("stale_threshold_seconds", float("inf"))
+                ),
             )
             self._index(inst)
 
