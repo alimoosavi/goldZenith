@@ -10,12 +10,11 @@ NIBI_RED_ENDPOINT_BASE_URL in `.env`).
 
 from __future__ import annotations
 
-import asyncio
 import json
 import sys
 from dataclasses import asdict
 
-import aiohttp
+import requests
 
 from broker.nibi import NibiBrokerClient
 from settings import config
@@ -24,23 +23,23 @@ from settings import config
 ORDER_ID = 978151
 
 
-async def main() -> None:
-    async with NibiBrokerClient(
+def main() -> None:
+    client = NibiBrokerClient(
         auth_token=config.nibi_auth_token,
         cookie=config.nibi_cookie,
         red_endpoint_base_url=config.nibi_red_endpoint_base_url,
-    ) as client:
-        try:
-            resp = await client.cancel_order(order_id=ORDER_ID)
-        except aiohttp.ClientResponseError as e:
-            print(f"❌ HTTP Error: {e.status} - {e.message}")
-            sys.exit(1)
-        except aiohttp.ClientConnectionError:
-            print("❌ Connection Error: Could not reach the endpoint.")
-            sys.exit(1)
-        except aiohttp.ClientError as e:
-            print(f"❌ Request failed: {e}")
-            sys.exit(1)
+    )
+    try:
+        resp = client.cancel_order(order_id=ORDER_ID)
+    except requests.HTTPError as e:
+        print(f"❌ HTTP Error: {e.response.status_code} - {e.response.text}")
+        sys.exit(1)
+    except requests.ConnectionError:
+        print("❌ Connection Error: Could not reach the endpoint.")
+        sys.exit(1)
+    except requests.RequestException as e:
+        print(f"❌ Request failed: {e}")
+        sys.exit(1)
 
     print("✅ Cancellation request sent!")
     print(json.dumps(asdict(resp), indent=2, ensure_ascii=False))
@@ -60,4 +59,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
