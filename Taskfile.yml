@@ -60,3 +60,8 @@ tasks:
     desc: Detect arbitrage signals from orderbook streams — pass --broker --isin ... via -- CLI_ARGS
     cmds:
       - uv run python scripts/run_arb_detector.py {{.CLI_ARGS}}
+
+  arb-engine:
+    desc: Run the unified arbitrage execution engine (state + evaluate hook) — pass --broker [--isin ...] via -- CLI_ARGS
+    cmds:
+      - uv run python scripts/run_arb_engine.py {{.CLI_ARGS}}
