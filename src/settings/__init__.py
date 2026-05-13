@@ -16,6 +16,8 @@ Environment variables (case-insensitive; also read from <repo>/.env):
   NIBI_API_BASE_URL       — Nibi REST API base (host of SubscribeInstrument)
   NIBI_AUTH_TOKEN         — Nibi bearer token (used in WS query + REST headers)
   NIBI_COOKIE             — Nibi cookie value sent on REST subscribe calls
+  NIBI_RED_ENDPOINT_BASE_URL — Nibi order-management REST API base
+                            (default: https://red.nibi.ir)
   DATA_DIR                — Local directory for runtime artefacts / logs.
                             Relative paths resolve against the repo root.
   ORDERBOOKS_DIR          — Directory holding `{ticker}_{jalali}.parquet`
@@ -63,6 +65,7 @@ class Config(BaseSettings):
     nibi_subscribe_url: str = ""
     nibi_auth_token: str = ""
     nibi_cookie: str = ""
+    nibi_red_endpoint_base_url: str = "https://red.nibi.ir"
 
     # Max ISINs that one SignalR hub connection can subscribe to via a
     # single `SubscribeInstrument` call. Each broker has its own server-
@@ -89,7 +92,12 @@ class Config(BaseSettings):
     market_open: str = "12:00:00"
     market_end: str = "18:00:00"
 
-    @field_validator("tsetmc_cdn_base_url", "pasargad_api_base_url", "nibi_subscribe_url")
+    @field_validator(
+        "tsetmc_cdn_base_url",
+        "pasargad_api_base_url",
+        "nibi_subscribe_url",
+        "nibi_red_endpoint_base_url",
+    )
     @classmethod
     def _strip_trailing_slash(cls, v: str) -> str:
         return v.rstrip("/")

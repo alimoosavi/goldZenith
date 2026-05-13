@@ -1,48 +1,63 @@
-import requests
+"""Cancel a single order by ID via the Nibi broker REST API.
+
+Edit ORDER_ID below, then:
+
+    uv run python scripts/cancel_order.py
+
+Auth + endpoint come from `config` (NIBI_AUTH_TOKEN, NIBI_COOKIE,
+NIBI_RED_ENDPOINT_BASE_URL in `.env`).
+"""
+
+from __future__ import annotations
+
+import asyncio
 import json
+import sys
+from dataclasses import asdict
 
-# ── Constants ─────────────────────────────────────────────────────────────────
-RED_ENDPOINT   = "https://red.nibi.ir"   # e.g. "https://api.example.com"
-AUTHORIZATION  = "eyJhbGciOiJBMjU2R0NNS1ciLCJlbmMiOiJBMjU2Q0JDLUhTNTEyIiwiaXYiOiI1ck9pZ3N6bW1zVm9CYW92IiwidGFnIjoiNHkzWHBxZjM2WHN4YkFoNUFpS2FnQSJ9.hwY5pAcRXj9fQxWhhuSJQPyFkbg-drs04PeAs5el2x2ZowD2-xhFWiecz79tgbjrDh-G5utW9N919R7eyHMVTQ.5UXeika9EYmWFXZtw4BHrg.EFUCxIimQokPjNAjN1Vxihjuw1_WkehK_BcjW6do30S9W-xwXN8eu5Y8BMhG70u23DuI1kbc28sxh5QEFffLkfJIXo8-54K7pfraHGaE-F3-DFIuvJEEPAolnVNfwoCVGr872kFlfkU6cY6lEwxbPw6NiYIjchoR0PBWNxLn3t6yGMfUgdWTsTlknYhKkQjnvjJATg6NDHXskUFqUdRkjN3vOzsbHs9wIv3pudaw1A9ddjUbG5Gi1SrR4NlTtIviwxCZYP09nwR0fBZinkTTgvTpG2ybpX6dF_Odp9i-lowBuI4L6B24IaTlTiPFaVO9521r6N7xUkBUJjhzbnEk9IUElgxi_fkbZpSOIyXNxEqLSWMyTaUauK48WS__wWQbN9YiADySNSmADul-caRfu5RoXnBj3Orps3cO0ospQJIye9L8gkgSeFAKKP_AHXLzu-ygd_p5YeNHzA-Yc_Zoggsxmpc_oNBQzXIWfZD3geOnfBWs6bK-ke1n9f9O3Wpn9BAOqMv-ap8PhBcz6tT3StPIUhquP98TTtRwGhZRg0fLU5WWraGMdRz5BpfjMXEEQsn0tmgBbQNG0GUy3CSRXUS7QMMqqUKcY496KpBJm76-uWjTG9eGTRURKFoAypkdDXbyWborce0MffKddX-Fx_mevqlCEe0BYcIJo3NAFFcWcrs7cF64oc3Id3HvW2vX9338fJ5NpQM4H7m-TkIkww.CbRAimf8oo95_10AnYkOa5Z_SeyW0n1GsQFfL7PnBds"
-COOKIE_VALUE   = "_sk_ni_108446=JtCq6KkU8aeYj5"          # the value after _sk_p2_155147 =
+import aiohttp
 
-# ── Order ID to Cancel ────────────────────────────────────────────────────────
-ORDER_ID = 976648   # Replace with the orderId you want to cancel
+from broker.nibi import NibiBrokerClient
+from settings import config
 
-# ── Headers ───────────────────────────────────────────────────────────────────
-headers = {
-    "Authorization": AUTHORIZATION,
-    "Cookie": COOKIE_VALUE,
-    "Content-Type": "application/json"
-}
+# ── Order to cancel ──────────────────────────────────────────────────────────
+ORDER_ID = 978151
 
-# ── Call the Endpoint ─────────────────────────────────────────────────────────
-url = f"{RED_ENDPOINT}/api/Orders/OrderCancellation?orderId={ORDER_ID}"
 
-try:
-    response = requests.post(url, headers=headers)
-    response.raise_for_status()
+async def main() -> None:
+    async with NibiBrokerClient(
+        auth_token=config.nibi_auth_token,
+        cookie=config.nibi_cookie,
+        red_endpoint_base_url=config.nibi_red_endpoint_base_url,
+    ) as client:
+        try:
+            resp = await client.cancel_order(order_id=ORDER_ID)
+        except aiohttp.ClientResponseError as e:
+            print(f"❌ HTTP Error: {e.status} - {e.message}")
+            sys.exit(1)
+        except aiohttp.ClientConnectionError:
+            print("❌ Connection Error: Could not reach the endpoint.")
+            sys.exit(1)
+        except aiohttp.ClientError as e:
+            print(f"❌ Request failed: {e}")
+            sys.exit(1)
 
-    data = response.json()
     print("✅ Cancellation request sent!")
-    print(json.dumps(data, indent=2, ensure_ascii=False))
+    print(json.dumps(asdict(resp), indent=2, ensure_ascii=False))
 
-    # Check result
-    resp = data.get("response", {})
-    if resp.get("successful"):
+    if resp.successful:
         print(f"\n📌 Order {ORDER_ID} cancelled successfully.")
-        if resp.get("errors"):
-            print(f"⚠️  Errors: {resp['errors']}")
+        if resp.data is not None:
+            order = resp.data
+            print(f"    Status       : {order.order_status}")
+            print(f"    Remaining    : {order.remaining_quantity}/{order.total_quantity}")
+    elif resp.errors:
+        print(f"\n📌 Errors ({len(resp.errors)}):")
+        for err in resp.errors:
+            print(f"   [{err.code}] ({err.type}) {err.message}")
     else:
-        print(f"\n❌ Cancellation was not successful.")
-        if resp.get("errors"):
-            print(f"   Errors: {resp['errors']}")
+        print("\n❌ Cancellation was not successful.")
 
-except requests.exceptions.HTTPError as e:
-    print(f"❌ HTTP Error: {e.response.status_code} - {e.response.text}")
-except requests.exceptions.ConnectionError:
-    print("❌ Connection Error: Could not reach the endpoint.")
-except requests.exceptions.RequestException as e:
-    print(f"❌ Request failed: {e}")
-except json.JSONDecodeError:
-    print(f"❌ Could not parse response as JSON:\n{response.text}")
+
+if __name__ == "__main__":
+    asyncio.run(main())

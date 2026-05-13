@@ -41,8 +41,12 @@ def main() -> None:
         help="Output root directory; files land at {out}/{isin}/{date}.jsonl (default: data/ticks)",
     )
     ap.add_argument(
-        "--flush-every", type=int, default=1,
-        help="Flush each file after every N writes — 1 = max durability (default: 1)",
+        "--flush-every", type=int, default=1000,
+        help="Flush when buffer reaches N records (default: 1000)",
+    )
+    ap.add_argument(
+        "--flush-interval", type=float, default=5.0,
+        help="Flush when seconds since last flush ≥ this (default: 5.0)",
     )
     args = ap.parse_args()
 
@@ -68,12 +72,13 @@ def main() -> None:
         out_dir=args.out,
         redis_manager=rm,
         flush_every=args.flush_every,
+        flush_interval=args.flush_interval,
     )
     signal.signal(signal.SIGINT, lambda *_: persister.stop())
 
     logger.info(
-        "broker=%s isins=%s → %s (flush_every=%d)",
-        args.broker, isins, args.out, args.flush_every,
+        "broker=%s isins=%s → %s (flush_every=%d, flush_interval=%.1fs)",
+        args.broker, isins, args.out, args.flush_every, args.flush_interval,
     )
     persister.run()
     logger.info(

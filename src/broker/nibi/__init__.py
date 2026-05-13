@@ -13,7 +13,28 @@ broker-specific branching.
 """
 
 from .adapter import from_bl, to_bl
+from .client import NibiBrokerClient
 from .mock_streamer import MockNibiStreamer
+from .schema import (
+    CancelOrderResponse,
+    CreateOrderResponse,
+    GetOrdersResponse,
+    Order,
+    OrderError,
+    OrderSide,
+)
 from .streamer import NibiStreamer
 
-__all__ = ["MockNibiStreamer", "NibiStreamer", "from_bl", "to_bl"]
+__all__ = [
+    "CancelOrderResponse",
+    "CreateOrderResponse",
+    "GetOrdersResponse",
+    "MockNibiStreamer",
+    "NibiBrokerClient",
+    "NibiStreamer",
+    "Order",
+    "OrderError",
+    "OrderSide",
+    "from_bl",
+    "to_bl",
+]
